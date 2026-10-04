@@ -83,24 +83,79 @@ enum Inpainter {
         var mask = luma.map { abs(Int($0) - background) > inkThreshold }
         mask = dilate(mask, width: crop.width, height: crop.height, radius: dilation)
 
-        let paper = luma.indices.filter { !mask[$0] }
-        let fraction = Double(paper.count) / Double(max(1, luma.count))
-        var flat: (UInt8, UInt8, UInt8)?
-        if fraction > 0.3 {
+        // Mean colour of `paper` pixels if they are flat enough to be a balloon.
+        func flatColor(_ paper: [Int]) -> (UInt8, UInt8, UInt8)? {
+            guard Double(paper.count) / Double(max(1, luma.count)) > 0.3 else { return nil }
             let values = paper.map { Double(luma[$0]) }
             let mean = values.reduce(0, +) / Double(values.count)
             let spread = (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)).squareRoot()
-            if spread < flatSpread {
-                let sum = paper.reduce((0, 0, 0)) { acc, i in
-                    (acc.0 + Int(crop.bytes[i * 4]), acc.1 + Int(crop.bytes[i * 4 + 1]), acc.2 + Int(crop.bytes[i * 4 + 2]))
-                }
-                let n = paper.count
-                flat = (UInt8(sum.0 / n), UInt8(sum.1 / n), UInt8(sum.2 / n))
+            guard spread < flatSpread else { return nil }
+            let sum = paper.reduce((0, 0, 0)) { acc, i in
+                (acc.0 + Int(crop.bytes[i * 4]), acc.1 + Int(crop.bytes[i * 4 + 1]), acc.2 + Int(crop.bytes[i * 4 + 2]))
             }
+            let n = paper.count
+            return (UInt8(sum.0 / n), UInt8(sum.1 / n), UInt8(sum.2 / n))
+        }
+        var flat = flatColor(luma.indices.filter { !mask[$0] })
+        // When the box crosses the balloon's edge, its outline and the art beyond count as neither
+        // ink nor paper: judge the balloon by its own paper, and never paint outside it.
+        let inside = balloonInterior(page, rect: rect, background: background)
+        if let inside {
+            if flat == nil, inside.filter({ $0 }).count * 2 >= luma.count {
+                flat = flatColor(luma.indices.filter { !mask[$0] && inside[$0] })
+            }
+            if flat != nil { for i in mask.indices where !inside[i] { mask[i] = false } }
         }
         // Over artwork the thresholded mask misses anti-aliased edges and outlines; erase the box.
         if flat == nil { mask = [Bool](repeating: true, count: mask.count) }
         return Job(rect: rect, mask: mask, flatColor: flat)
+    }
+
+    /// Pixels of `rect` inside the balloon holding the text: the balloon-coloured region with the
+    /// most pixels in `rect`, plus everything it encloses (the letters). Found in a window a little
+    /// larger than `rect`, so letters never touch its edge. The outline and whatever lies beyond it
+    /// connect to the window edge, so cloud-shaped and overlapping balloons keep their outlines.
+    /// Nil when no balloon-coloured region is found.
+    static func balloonInterior(_ page: PixelBuffer, rect: CGRect, background: Int) -> [Bool]? {
+        let window = rect.insetBy(dx: -16, dy: -16).integral.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+        let luma = page.cropped(to: window).luma()
+        let w = Int(window.width), h = Int(window.height)
+        let ox = Int(rect.minX - window.minX), oy = Int(rect.minY - window.minY), rw = Int(rect.width), rh = Int(rect.height)
+        func flood(from seeds: [Int], label: inout [Int32], id: Int32, where passable: (Int) -> Bool) -> Int {
+            var stack = seeds.filter { label[$0] == 0 && passable($0) }
+            for i in stack { label[i] = id }
+            var size = 0
+            while let i = stack.popLast() {
+                size += 1
+                let x = i % w, y = i / w
+                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] where nx >= 0 && ny >= 0 && nx < w && ny < h {
+                    let j = ny * w + nx
+                    if label[j] == 0 && passable(j) { label[j] = id; stack.append(j) }
+                }
+            }
+            return size
+        }
+        let paper = { (i: Int) in abs(Int(luma[i]) - background) <= 24 }
+        // Balloon-coloured regions, scored by how much of the text box they cover.
+        var label = [Int32](repeating: 0, count: w * h)
+        var inRect = [Int32: Int](), next: Int32 = 0
+        for y in oy..<oy + rh {
+            for x in ox..<ox + rw where label[y * w + x] == 0 && paper(y * w + x) {
+                next += 1
+                _ = flood(from: [y * w + x], label: &label, id: next, where: paper)
+            }
+        }
+        for y in oy..<oy + rh { for x in ox..<ox + rw where label[y * w + x] > 0 { inRect[label[y * w + x], default: 0] += 1 } }
+        guard let balloon = inRect.max(by: { $0.value < $1.value })?.key, inRect[balloon]! * 5 >= rw * rh else { return nil }
+        // Everything reachable from the window edge without crossing the balloon is outside it.
+        var outside: [Int32] = label.map { $0 == balloon ? 1 : 0 }
+        var edge: [Int] = []
+        for x in 0..<w { edge.append(x); edge.append((h - 1) * w + x) }
+        for y in 0..<h { edge.append(y * w); edge.append(y * w + w - 1) }
+        _ = flood(from: edge, label: &outside, id: 2) { _ in true }
+        var inside = [Bool](repeating: false, count: rw * rh)
+        for y in 0..<rh { for x in 0..<rw { inside[y * rw + x] = outside[(y + oy) * w + x + ox] != 2 } }
+        return inside
     }
 
     static func dilate(_ mask: [Bool], width: Int, height: Int, radius: Int) -> [Bool] {
