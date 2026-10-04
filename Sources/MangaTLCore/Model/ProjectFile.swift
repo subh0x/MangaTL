@@ -31,6 +31,8 @@ public struct ProjectFile: Codable, Equatable, Sendable {
     /// Reading order.
     public var pages: [PageRef]
     public var state = State()
+    /// Last export settings, offered again next time.
+    public var export: ExportOptions?
     public var updated = Date()
 
     public init(settings: ProjectSettings = ProjectSettings(), pages: [PageRef] = []) {

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MangaTLCore
 import Observation
@@ -76,15 +77,22 @@ final class ProjectSession {
         }
     }
 
-    func export(to url: URL, format: BookExporter.Format) {
+    /// Pages selected in the grid (for "Export Selected").
+    var gridSelection: [Int] = []
+
+    /// Exports `pages` (nil = all) and remembers `options` for next time.
+    func export(pages: [Int]?, options: ExportOptions, to url: URL) {
         cancel()
         lastError = nil
-        let (source, store, settings) = (source, store, settings)
+        source.exportOptions = options
+        let (source, store, settings, title) = (source, store, settings, title)
         worker = Task {
             do {
-                try await BookExporter.export(source, store: store, settings: settings, to: url, format: format) { done, total in
+                try await BookExporter.export(source, store: store, settings: settings, pages: pages, options: options, title: title,
+                                              to: url) { done, total in
                     Task { @MainActor in if self.worker != nil { self.progress = (done, total, min(done, total - 1), "Exporting") } }
                 }
+                if options.revealInFinder { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             } catch is CancellationError {
             } catch {
                 lastError = "Export failed: \(error.localizedDescription)"

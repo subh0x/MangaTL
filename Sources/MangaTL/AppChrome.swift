@@ -28,10 +28,24 @@ struct LanguageMenu: View {
     }
 }
 
-/// Project-level sheets opened from the Translate menu.
-enum ProjectSheet: String, Identifiable {
+/// Which pages an Export sheet starts with.
+enum ExportScope: Equatable {
+    case all
+    case pages([Int])
+}
+
+/// Project-level sheets opened from menus.
+enum ProjectSheet: Identifiable, Equatable {
     case presets, typesetCheck
-    var id: String { rawValue }
+    case export(ExportScope)
+
+    var id: String {
+        switch self {
+        case .presets: "presets"
+        case .typesetCheck: "typesetCheck"
+        case .export: "export"
+        }
+    }
 }
 
 struct TranslateMenu: View {
@@ -62,9 +76,11 @@ struct TranslateMenu: View {
             Button("Revert This Page to Original") { project.revert(page: editor?.index ?? position.page) }
                 .disabled(editor != nil)
             Divider()
-            Button("Export as CBZ…") { exportCBZ() }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
-            Button("Export as Images…") { exportFolder() }
+            Button("Export…") { onShow(.export(.all)) }
+            Button(editor != nil ? "Export This Page…" : "Export Current Page…") {
+                if let editor, editor.dirty { editor.save() }
+                onShow(.export(.pages([editor?.index ?? position.page])))
+            }
             if project.isTranslating {
                 Divider()
                 Button("Stop") { project.cancel() }
@@ -82,25 +98,6 @@ struct TranslateMenu: View {
             project.translate(pages: [editor.index], redo: true)
         } else {
             project.translate(pages: [position.page], redo: true)
-        }
-    }
-
-    private func exportCBZ() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "cbz") ?? .zip]
-        panel.nameFieldStringValue = "\(project.source.title) (English).cbz"
-        if panel.runModal() == .OK, let url = panel.url { project.export(to: url, format: .cbz) }
-    }
-
-    private func exportFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Export Here"
-        panel.message = "Pages are written as 001.jpg, 002.jpg… in a new folder inside the one you choose."
-        if panel.runModal() == .OK, let url = panel.url {
-            project.export(to: url.appendingPathComponent("\(project.source.title) (English)"), format: .folder)
         }
     }
 }

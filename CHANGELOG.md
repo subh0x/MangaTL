@@ -21,9 +21,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - Reader zoom is remembered per project.
   - Large grid sizes use sharper 640 px thumbnails.
 - **Tooltips:** compact dark tooltips that appear after about 0.3 s (instead of about 1 s) and show the keyboard shortcut.
+- **Export options** (File › Export…, ⇧⌘E; Export Page in the editor; Export Selected in the grid):
+  - **Pages:** all, current or selected, a range, or translated only.
+  - **Content:** final, clean, text layer only (transparent) or original.
+  - **Format:** JPEG, PNG or HEIC with a quality setting, at original, working or custom size.
+  - **Package:** a folder with a name pattern, a CBZ or a PDF.
+  - The last choices are remembered per project.
 - **Editor brush colour:** in the toolbar it is now a small swatch that opens a popover with the colour picker, hex field and recent colours.
 
 ### Fixed
+- PDF pages smaller than the requested size were drawn unscaled in the corner of a white page. This affected Import PDF. PDF pages now scale to the requested size, at up to 300 dpi.
 - The reader refreshes a page as soon as its translation finishes. Previously only the most recently created page view was notified.
 - Hovering a control could lose its tooltip when another view disappeared.
 

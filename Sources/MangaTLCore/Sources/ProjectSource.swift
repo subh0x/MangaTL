@@ -76,6 +76,11 @@ public final class ProjectSource: PageSource, @unchecked Sendable {
         set { update { $0.settings = newValue } }
     }
 
+    public var exportOptions: ExportOptions? {
+        get { lock.withLock { file.export } }
+        set { update { $0.export = newValue } }
+    }
+
     public var state: ProjectFile.State {
         get { lock.withLock { file.state } }
         set { update { $0.state = newValue } }

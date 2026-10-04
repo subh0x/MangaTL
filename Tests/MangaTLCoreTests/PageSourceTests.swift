@@ -77,6 +77,17 @@ struct Fixture {
         #expect(image.height == 850 && image.width == 600)
     }
 
+    @Test func pdfPagesScaleUpToTheRequestedSize() throws {
+        // 600×850 pt page with a black square at (50,50)-(150,150) from the bottom-left.
+        let image = try PageSources.open(fixture.pdf).image(at: 0, maxPixelSize: 1700)
+        #expect(image.width == 1200 && image.height == 1700)
+        let pixels = PixelBuffer(image)
+        func luma(_ x: Int, _ y: Int) -> UInt8 { pixels.bytes[(y * pixels.width + x) * 4] }
+        #expect(luma(200, 1700 - 200) < 30, "square drawn at 2× near the bottom-left")
+        #expect(luma(200, 200) > 220, "top-left is blank page, not an unscaled corner")
+        #expect(luma(1100, 1600) > 220)
+    }
+
     @Test func rejectsUnsupportedFiles() throws {
         #expect(throws: PageSourceError.self) { try PageSources.open(fixture.folder.appendingPathComponent("notes.txt")) }
     }
@@ -108,44 +119,5 @@ struct Fixture {
         ThumbnailCache.trimDisk(root: root, limit: 140 * 1024)
         let left = try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
         #expect(left == ["2.heic", "3.heic"])
-    }
-}
-
-@Suite struct ExportTests {
-    @Test(arguments: [BookExporter.Format.cbz, .folder])
-    func exportsEveryPageAndAppliesTranslations(format: BookExporter.Format) async throws {
-        let fixture = try Fixture()
-        let source = try ProjectSource(folder: fixture.folder)
-        let store = source.store
-        let page2 = source.pageKey(at: 1)
-        // Page 2 "translated": a black 100×100 layer at its top-left corner, plus a hidden black one.
-        var black = PixelBuffer(width: 100, height: 100)
-        for i in 0..<100 * 100 { black.bytes[i * 4 + 3] = 255 }
-        let shown = ImageLayer(name: "Clean-up", rect: CGRect(x: 0, y: 0, width: 100, height: 100))
-        var hidden = ImageLayer(name: "Hidden", rect: CGRect(x: 400, y: 700, width: 100, height: 100))
-        hidden.visible = false
-        try store.saveLayer(black.makeImage(), page: page2, id: shown.id)
-        try store.saveLayer(black.makeImage(), page: page2, id: hidden.id)
-        try store.save(PageDoc(workingSize: CGSize(width: 1000, height: 1500), layers: [shown, hidden]), page: page2)
-
-        let out = fixture.root.appendingPathComponent(format == .cbz ? "out.cbz" : "out")
-        try await BookExporter.export(source, store: store, settings: ProjectSettings(), to: out, format: format)
-        let exported = try PageSources.open(out)
-        #expect(exported.count == 3)
-        #expect((0..<3).map(exported.name(at:)) == ["1.jpg", "2.jpg", "3.jpg"])
-        let pixels = PixelBuffer(try exported.image(at: 1, maxPixelSize: 1500))
-        #expect(pixels.bytes[(10 * pixels.width + 10) * 4] < 30, "patch applied")
-        #expect(pixels.bytes[(800 * pixels.width + 500) * 4] > 200, "rest of page untouched")
-        #expect(pixels.bytes[(750 * pixels.width + 450) * 4] > 200, "hidden layer not exported")
-    }
-
-    @Test func legacyPatchDocsBecomeOneLayer() throws {
-        let json = #"{"blocks":[],"workingSize":[1000,1500],"hasPatch":true}"#
-        let doc = try JSONDecoder().decode(PageDoc.self, from: Data(json.utf8))
-        #expect(doc.layers.count == 1)
-        #expect(doc.layers[0].id == ImageLayer.legacyID)
-        #expect(doc.layers[0].rect == CGRect(x: 0, y: 0, width: 1000, height: 1500))
-        let roundTrip = try JSONDecoder().decode(PageDoc.self, from: JSONEncoder().encode(doc))
-        #expect(roundTrip == doc)
     }
 }

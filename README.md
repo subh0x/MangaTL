@@ -51,7 +51,18 @@ and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Changes are listed in [CHANGEL
   - **Layers:** text boxes plus image layers (the "Text Clean-up" made by translation, and any retouch layers you add). Each layer can be hidden, renamed, reordered, repainted or deleted.
   - **Brushes:** **Erase** (E), **Heal** (H), **Clone** (C, ⌥-click to set the source) and **Unpaint** (R). `[` and `]` change the brush size.
   - Every action is its own undo step (⌘Z).
-- **Export as CBZ…** (⇧⌘E) or **Export as Images…** from the Translate menu, in project page order.
+- **Typesetting:**
+  - Lettering follows each balloon's shape, in a "diamond" from scanlation practice.
+  - Each box has a role: dialogue, thought, shout, whisper, narration or sound effect. Roles share styles set in **Translate › Typesetting Presets…**.
+  - **Typeset Check** (⇧⌘K) flags text that doesn't fit, size outliers and lone words, with one-click fixes.
+- **Navigating:**
+  - The page sidebar in the reader and editor (⌃⌘S) jumps to and reorders pages.
+  - Zoom controls in the status bar set the grid's thumbnail size and the reader's Fit Width or Fit Height. ⌘± and trackpad pinch work too.
+- **Export** (File › Export…, ⇧⌘E; also *Export Page* in the editor, and *Export Selected* in the grid):
+  - **Pages:** all, current or selected, a range, or translated pages only.
+  - **Content:** final, clean (text removed, no new text), text layer only (transparent PNG), or original.
+  - **Format:** JPEG, PNG or HEIC, at original, working or custom size.
+  - **Package:** a folder of images (with a file-name pattern), a CBZ or a PDF.
 
 ## How it works
 

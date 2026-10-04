@@ -209,10 +209,10 @@ enum SmokeRun {
         }
         TooltipPresenter.shared.hide()
 
-        for which in [ProjectSheet.presets, .typesetCheck] {
+        for which in [ProjectSheet.presets, .typesetCheck, .export(.all)] {
             view.show(which)
             try? await Task.sleep(for: .seconds(1.5))
-            snapshotWindow(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_sheet_\(which.rawValue).png"), sheet: true)
+            snapshotWindow(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_sheet_\(which.id).png"), sheet: true)
             view.show(nil)
             try? await Task.sleep(for: .milliseconds(500))
         }

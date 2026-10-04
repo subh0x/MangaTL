@@ -15,7 +15,9 @@ public enum PageRenderer {
         }
     }
 
-    public static func render(page: CGImage, doc: PageDoc, layers: [Layer], settings: ProjectSettings, showText: Bool = true) -> CGImage? {
+    /// `showPage: false` leaves the page and layers out: just the lettering on transparency.
+    public static func render(page: CGImage, doc: PageDoc, layers: [Layer], settings: ProjectSettings, showText: Bool = true,
+                              showPage: Bool = true) -> CGImage? {
         let size = CGSize(width: page.width, height: page.height)
         guard let ctx = CGContext(data: nil, width: page.width, height: page.height, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -23,9 +25,13 @@ public enum PageRenderer {
         else { return nil }
         let bounds = CGRect(origin: .zero, size: size)
         ctx.interpolationQuality = .high
-        ctx.draw(page, in: bounds)
         let scale = size.width / max(1, doc.workingSize.width)
-        drawLayers(layers, in: ctx, pageHeight: size.height, scale: scale)
+        if showPage {
+            ctx.draw(page, in: bounds)
+            drawLayers(layers, in: ctx, pageHeight: size.height, scale: scale)
+        } else {
+            ctx.clear(bounds)
+        }
         if showText {
             for block in doc.blocks where !block.hidden {
                 drawText(block, style: settings.resolvedStyle(for: block), in: ctx, pageSize: size, scale: scale)

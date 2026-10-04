@@ -33,6 +33,7 @@ struct PageCollectionView: NSViewRepresentable {
     /// Trackpad pinch: new grid size, or new reader zoom.
     var onGridSize: (CGFloat) -> Void = { _ in }
     var onReaderZoom: (ReaderZoom) -> Void = { _ in }
+    var onExport: ([Int]) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -42,6 +43,7 @@ struct PageCollectionView: NSViewRepresentable {
         collection.dataSource = context.coordinator
         collection.delegate = context.coordinator
         collection.isSelectable = true
+        collection.allowsMultipleSelection = true
         collection.backgroundColors = [.windowBackgroundColor]
         collection.register(PageItem.self, forItemWithIdentifier: PageItem.identifier)
         // Drag thumbnails to reorder; drop image files to add pages.
@@ -318,6 +320,14 @@ struct PageCollectionView: NSViewRepresentable {
             return min(Self.readerMaxPixels, Int(readerLayout.columnWidth * scale / ReaderLayout.defaultAspect))
         }
 
+        func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+            project.gridSelection = collectionView.selectionIndexPaths.map(\.item).sorted()
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+            project.gridSelection = collectionView.selectionIndexPaths.map(\.item).sorted()
+        }
+
         func collectionView(_ collectionView: NSCollectionView, didEndDisplaying item: NSCollectionViewItem, forRepresentedObjectAt indexPath: IndexPath) {
             (item as? PageItem)?.clear()
         }
@@ -390,6 +400,7 @@ struct PageCollectionView: NSViewRepresentable {
                 self.project.move(fromOffsets: targets, toOffset: self.project.count)
             }
             add("Add Images After…") { [weak self] in self?.chooseImages(at: (targets.last ?? index) + 1) }
+            add("Export \(label)…") { [weak self] in self?.parent.onExport(Array(targets)) }
             menu.addItem(.separator())
             add("Show in Finder") { [weak self] in
                 guard let self else { return }

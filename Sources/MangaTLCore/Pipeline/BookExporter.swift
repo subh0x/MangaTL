@@ -4,40 +4,106 @@ import ImageIO
 import UniformTypeIdentifiers
 import ZIPFoundation
 
-/// Writes the book with translations applied — untranslated pages are copied as-is (re-encoded).
-/// One page is decoded, rendered and written at a time.
+/// Writes pages (final, clean, text-only or original) as a folder of images, a CBZ or a PDF.
+/// One page is decoded, rendered, encoded and written at a time.
 public enum BookExporter {
-    public enum Format: Sendable { case cbz, folder }
-    /// Longest side of exported pages; originals larger than this are scaled down.
-    public static let maxPixels = 4096
-
-    /// With `store` nil the pages are written as they are (used to import a CBZ/PDF into a folder).
-    public static func export(_ source: any PageSource, store: ProjectStore?, settings: ProjectSettings, to url: URL, format: Format,
+    /// - Parameters:
+    ///   - pages: 0-based page indices to export, in order (nil = all).
+    ///   - store: with nil, pages are written as they are (used to import a CBZ/PDF into a folder).
+    public static func export(_ source: any PageSource, store: ProjectStore?, settings: ProjectSettings, pages: [Int]? = nil,
+                              options: ExportOptions, title: String = "", to url: URL,
                               progress: @Sendable (Int, Int) -> Void = { _, _ in }) async throws {
-        let digits = String(source.count).count
-        var archive: Archive?
-        switch format {
-        case .cbz:
-            try? FileManager.default.removeItem(at: url)
-            archive = try Archive(url: url, accessMode: .create)
-        case .folder:
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        }
-        for index in 0..<source.count {
+        let indices = pages ?? Array(0..<source.count)
+        let format = options.effectiveFormat
+        let writer = try Writer(package: options.package, url: url)
+        var used = Set<String>()
+        for (n, index) in indices.enumerated() {
             try Task.checkCancellation()
-            progress(index, source.count)
-            let data: Data = try autoreleasepool {
-                var image = try source.image(at: index, maxPixelSize: maxPixels)
-                let page = source.pageKey(at: index)
-                if let store, let doc = store.loadPage(page),
-                   let rendered = PageRenderer.render(page: image, doc: doc, layers: store.visibleLayers(of: doc, page: page), settings: settings) {
-                    image = rendered
+            progress(n, indices.count)
+            try autoreleasepool {
+                let image = try render(source, index: index, store: store, settings: settings, options: options)
+                if options.package == .pdf {
+                    try writer.addPDFPage(image, format: format, quality: options.quality)
+                } else {
+                    let base = options.fileName(index: index, count: source.count, originalName: source.name(at: index), project: title)
+                    var name = "\(base).\(format.fileExtension)", copy = 2
+                    while used.contains(name.lowercased()) {
+                        name = "\(base) \(copy).\(format.fileExtension)"
+                        copy += 1
+                    }
+                    used.insert(name.lowercased())
+                    try writer.add(encode(image, format: format, quality: options.quality), name: name)
                 }
-                return try jpeg(image)
             }
-            let name = String(repeating: "0", count: max(0, digits - String(index + 1).count)) + "\(index + 1).jpg"
+        }
+        try writer.finish()
+        progress(indices.count, indices.count)
+    }
+
+    static func render(_ source: any PageSource, index: Int, store: ProjectStore?, settings: ProjectSettings,
+                       options: ExportOptions) throws -> CGImage {
+        let page = try source.image(at: index, maxPixelSize: options.size.maxPixels)
+        guard options.content != .original, let store else { return page }
+        let key = source.pageKey(at: index)
+        guard let doc = store.loadPage(key) else {
+            // Untranslated: the original, or nothing for a text-only export.
+            return options.content == .textOnly ? blank(like: page) : page
+        }
+        let rendered = PageRenderer.render(page: page, doc: doc, layers: store.visibleLayers(of: doc, page: key), settings: settings,
+                                           showText: options.content != .clean, showPage: options.content != .textOnly)
+        return rendered ?? page
+    }
+
+    private static func blank(like page: CGImage) -> CGImage {
+        let ctx = CGContext(data: nil, width: page.width, height: page.height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        return ctx.makeImage()!
+    }
+
+    static func encode(_ image: CGImage, format: ExportOptions.Format, quality: Double) throws -> Data {
+        let type: UTType = switch format {
+        case .jpeg: .jpeg
+        case .png: .png
+        case .heic: .heic
+        }
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        let properties: [CFString: Any] = format.hasQuality ? [kCGImageDestinationLossyCompressionQuality: quality] : [:]
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
+        return data as Data
+    }
+
+    /// The output container: a folder, a CBZ (ZIP, stored), or a PDF with one page per image.
+    final class Writer {
+        let package: ExportOptions.Package
+        let url: URL
+        private var archive: Archive?
+        private var pdf: CGContext?
+
+        init(package: ExportOptions.Package, url: URL) throws {
+            self.package = package
+            self.url = url
+            switch package {
+            case .folder:
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            case .cbz:
+                try? FileManager.default.removeItem(at: url)
+                archive = try Archive(url: url, accessMode: .create)
+            case .pdf:
+                try? FileManager.default.removeItem(at: url)
+                guard let context = CGContext(url as CFURL, mediaBox: nil, [kCGPDFContextCreator: "MangaTL"] as CFDictionary) else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                pdf = context
+            }
+        }
+
+        func add(_ data: Data, name: String) throws {
             if let archive {
-                // JPEGs don't compress further; store them.
+                // Images don't compress further; store them.
                 try archive.addEntry(with: name, type: .file, uncompressedSize: Int64(data.count), compressionMethod: .none) { position, size in
                     data.subdata(in: Int(position)..<Int(position) + size)
                 }
@@ -45,16 +111,24 @@ public enum BookExporter {
                 try data.write(to: url.appendingPathComponent(name), options: .atomic)
             }
         }
-        progress(source.count, source.count)
-    }
 
-    static func jpeg(_ image: CGImage) throws -> Data {
-        let data = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else {
-            throw CocoaError(.fileWriteUnknown)
+        /// A PDF page the size of the image (1 px = 1 pt). JPEG data is embedded as-is (DCT), which
+        /// keeps PDFs close to the size of the images.
+        func addPDFPage(_ image: CGImage, format: ExportOptions.Format, quality: Double) throws {
+            guard let pdf else { return }
+            var drawn = image
+            if format == .jpeg, let provider = CGDataProvider(data: try encode(image, format: .jpeg, quality: quality) as CFData),
+               let jpeg = CGImage(jpegDataProviderSource: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) {
+                drawn = jpeg
+            }
+            var box = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+            pdf.beginPage(mediaBox: &box)
+            pdf.draw(drawn, in: box)
+            pdf.endPage()
         }
-        CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary)
-        guard CGImageDestinationFinalize(dest) else { throw CocoaError(.fileWriteUnknown) }
-        return data as Data
+
+        func finish() throws {
+            pdf?.closePDF()
+        }
     }
 }

@@ -26,7 +26,9 @@ public final class PDFSource: PageSource, @unchecked Sendable {
             let box = page.getBoxRect(.cropBox)
             let rotated = page.rotationAngle % 180 != 0
             let size = rotated ? CGSize(width: box.height, height: box.width) : box.size
-            let scale = CGFloat(maxPixelSize) / max(size.width, size.height)
+            // Render at the requested size, but no sharper than 300 dpi (PDF units are 1/72 in).
+            let longest = max(size.width, size.height)
+            let scale = min(CGFloat(maxPixelSize), longest * 300 / 72) / longest
             let width = max(1, Int(size.width * scale)), height = max(1, Int(size.height * scale))
             guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -36,7 +38,23 @@ public final class PDFSource: PageSource, @unchecked Sendable {
             ctx.setFillColor(.white)
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
             ctx.interpolationQuality = .high
-            ctx.concatenate(page.getDrawingTransform(.cropBox, rect: CGRect(x: 0, y: 0, width: width, height: height), rotate: 0, preserveAspectRatio: true))
+            // getDrawingTransform never scales up, so build the transform here: scale, then undo the
+            // page's rotation and crop-box offset.
+            ctx.scaleBy(x: scale, y: scale)
+            switch (page.rotationAngle % 360 + 360) % 360 {
+            case 90:
+                ctx.translateBy(x: 0, y: size.height)
+                ctx.rotate(by: -.pi / 2)
+            case 180:
+                ctx.translateBy(x: size.width, y: size.height)
+                ctx.rotate(by: .pi)
+            case 270:
+                ctx.translateBy(x: size.width, y: 0)
+                ctx.rotate(by: .pi / 2)
+            default:
+                break
+            }
+            ctx.translateBy(x: -box.minX, y: -box.minY)
             ctx.drawPDFPage(page)
             guard let image = ctx.makeImage() else { throw PageSourceError.unreadable(name(at: index)) }
             return image

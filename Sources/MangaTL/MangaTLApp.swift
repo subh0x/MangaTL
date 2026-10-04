@@ -25,6 +25,9 @@ struct MangaTLApp: App {
         WindowGroup {
             ContentView()
         }
+        .commands {
+            CommandGroup(after: .saveItem) { ExportMenuItem() }
+        }
 
         .defaultSize(width: 1100, height: 800)
     }
@@ -68,6 +71,7 @@ struct ContentView: View {
                 Button("OK") { error = nil; project?.dismissError() }
             } message: { Text($0) }
             .onChange(of: project?.lastTranslated?.token) { reloadEditorIfTranslated() }
+            .focusedSceneValue(\.exportAction, project == nil ? nil : ExportAction { openExport() })
             .sheet(item: $sheet) { which in
                 if let project {
                     switch which {
@@ -78,6 +82,8 @@ struct ContentView: View {
                             editor?.tool = .select
                             editor?.selection = [block]
                         }
+                    case .export(let scope):
+                        ExportView(project: project, scope: scope)
                     }
                 }
             }
@@ -175,11 +181,20 @@ struct ContentView: View {
                 gridSize = Double(size)
             } onReaderZoom: { zoom in
                 readerZoom = zoom
+            } onExport: { pages in
+                sheet = .export(.pages(pages))
             }
             .id(ObjectIdentifier(project))
         } else {
             WelcomeView(recents: recents, onOpen: { open($0) }, onOpenFolder: { choosingFolder = true }, onImport: { importArchive() })
         }
+    }
+
+    /// File › Export…: the grid selection if there is one, else the whole project.
+    private func openExport() {
+        if let editor, editor.dirty { editor.save() }
+        let selected = project?.gridSelection ?? []
+        sheet = .export(editor == nil && mode == .grid && !selected.isEmpty ? .pages(selected) : .all)
     }
 
     private var sidebarToggle: some View {
@@ -199,7 +214,10 @@ struct ContentView: View {
         if let project, let editor {
             ToolbarItem(placement: .navigation) { sidebarToggle }
             EditorToolbar(model: editor, pageCount: project.count, inspectorVisible: $inspectorVisible,
-                          onClose: closeEditor, onOpenPage: edit)
+                          onClose: closeEditor, onOpenPage: edit) {
+                if editor.dirty { editor.save() }
+                sheet = .export(.pages([editor.index]))
+            }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 LanguageMenu(project: project)
@@ -301,7 +319,7 @@ struct ContentView: View {
         Task {
             do {
                 let source = try PageSources.open(archive)
-                try await BookExporter.export(source, store: nil, settings: ProjectSettings(), to: folder, format: .folder)
+                try await BookExporter.export(source, store: nil, settings: ProjectSettings(), options: .importArchive, to: folder)
                 busy = nil
                 open(folder)
             } catch {
@@ -382,4 +400,23 @@ struct ContentView: View {
     func setReaderZoom(_ zoom: ReaderZoom) { readerZoom = zoom }
     func setSidebar(_ visible: Bool) { sidebarPreferred = visible; syncColumns() }
     #endif
+}
+
+/// The window's export action, for File › Export… (⇧⌘E).
+struct ExportAction {
+    let run: () -> Void
+}
+
+extension FocusedValues {
+    @Entry var exportAction: ExportAction?
+}
+
+struct ExportMenuItem: View {
+    @FocusedValue(\.exportAction) private var export
+
+    var body: some View {
+        Button("Export…") { export?.run() }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(export == nil)
+    }
 }

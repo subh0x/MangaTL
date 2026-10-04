@@ -83,7 +83,7 @@ import Testing
 
     @Test func importingACBZWritesAnOrderedFolder() async throws {
         let out = fixture.root.appendingPathComponent("Imported")
-        try await BookExporter.export(try PageSources.open(fixture.cbz), store: nil, settings: ProjectSettings(), to: out, format: .folder)
+        try await BookExporter.export(try PageSources.open(fixture.cbz), store: nil, settings: ProjectSettings(), options: .importArchive, to: out)
         let project = try ProjectSource(folder: out)
         #expect(project.pages.map(\.file) == ["1.jpg", "2.jpg", "3.jpg"])
     }

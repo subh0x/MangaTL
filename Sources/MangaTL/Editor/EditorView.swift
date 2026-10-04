@@ -41,6 +41,7 @@ struct EditorToolbar: ToolbarContent {
     @Binding var inspectorVisible: Bool
     var onClose: () -> Void
     var onOpenPage: (Int) -> Void
+    var onExport: () -> Void
 
     var body: some ToolbarContent {
         // UndoManager isn't observable; reading these re-evaluates canUndo/canRedo after each edit.
@@ -115,6 +116,11 @@ struct EditorToolbar: ToolbarContent {
                 .tip("Fit height")
             Button { model.zoomCommand = .zoomIn } label: { Label("Zoom In", systemImage: "plus.magnifyingglass") }
                 .keyboardShortcut("=").tip("Zoom in", shortcut: "⌘=")
+        }
+        ToolbarItem {
+            Button { onExport() } label: { Label("Export Page", systemImage: "square.and.arrow.up") }
+                .keyboardShortcut("e", modifiers: [.command, .option])
+                .tip("Export this page", shortcut: "⌥⌘E")
         }
         ToolbarItem {
             Toggle(isOn: $inspectorVisible) { Label("Inspector", systemImage: "sidebar.right") }
