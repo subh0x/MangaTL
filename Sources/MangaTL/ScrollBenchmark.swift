@@ -185,6 +185,13 @@ enum SmokeRun {
         try? fm.removeItem(at: outside)
         try? await Task.sleep(for: .seconds(1))
         log("folder watch: removed → \(project.count) pages")
+        // A page removed from the project stays out although its file is still in the folder.
+        let removedFile = project.pages[1].file
+        project.remove(atOffsets: [1])
+        project.rescanFolder()
+        log("remove page \(removedFile): \(project.count) pages after rescan, back in project \(project.pages.contains { $0.file == removedFile })")
+        project.addImages([copy.appendingPathComponent(removedFile)], at: 1)
+        log("add it back: \(project.pages.map(\.file)), at \((project.pages.firstIndex { $0.file == removedFile } ?? -1) + 1)")
 
         // A failing export lands in the Problems panel (which opens itself); Retry fails again.
         project.export(pages: [0], options: ExportOptions(), to: URL(fileURLWithPath: "/System/mangatl-smoke/out.cbz"))
@@ -275,6 +282,21 @@ enum SmokeRun {
             reloaded.selection = Set(reloaded.doc.blocks.prefix(1).map(\.id))
         }
         for width in [820.0, 1000, 1400] { await snapshot(width: width, name: "editor") }
+
+        // Deleting pages from the sidebar while editing: the editor stays on its page.
+        if let editing = view.currentEditor {
+            let key = editing.pageKey, pagesBefore = project.count
+            view.edit(1)
+            try? await Task.sleep(for: .milliseconds(300))
+            let onSecond = view.currentEditor?.pageKey
+            view.removeFromSidebar([0, 2])
+            try? await Task.sleep(for: .milliseconds(300))
+            log("sidebar delete pages 1 and 3 while editing page 2: \(pagesBefore) → \(project.count) pages, editor still on its page \(view.currentEditor?.pageKey == onSecond) at \((view.currentEditor?.index ?? -1) + 1)")
+            view.removeFromSidebar([0])
+            try? await Task.sleep(for: .milliseconds(300))
+            log("delete the edited page: \(project.count) pages, editor on page \((view.currentEditor?.index ?? -1) + 1), key changed \(view.currentEditor?.pageKey != onSecond)")
+            _ = key
+        }
 
         view.closeProject()
         try? await Task.sleep(for: .milliseconds(300))
@@ -411,6 +433,12 @@ enum SmokeRun {
             reopened.activate(healLayer)
             let size = reopened.doc.blocks.first { $0.id == first.id }?.style?.fontSize
             log("reopened: layers [\(names)], heal px alpha \(reopened.activeLayerAlpha(975, 730)), box 1 size \(size.map { "\(Int($0))" } ?? "auto"), text \"\(reopened.doc.blocks.first { $0.id == first.id }?.translation ?? "")\"")
+            // Deleting a layer must stick: gone from the page and its file pruned after saving.
+            let store = model.project.store, key = model.pageKey
+            reopened.deleteLayer(healLayer)
+            reopened.save()
+            let again = try? EditorModel(project: model.project, index: model.index)
+            log("deleted heal layer and saved → reopened layers [\((again?.doc.layers ?? []).map(\.name).joined(separator: ", "))], file left \(store.loadLayer(key, healLayer) != nil)")
         }
         model.setLayerVisible(eraseLayer, true)
 

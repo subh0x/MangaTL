@@ -33,6 +33,8 @@ public struct ProjectFile: Codable, Equatable, Sendable {
     public var state = State()
     /// Last export settings, offered again next time.
     public var export: ExportOptions?
+    /// Image files the user removed from the project; they stay in the folder but aren't re-added.
+    public var removed: [String]?
     public var updated = Date()
 
     public init(settings: ProjectSettings = ProjectSettings(), pages: [PageRef] = []) {
@@ -61,6 +63,8 @@ public struct ProjectFile: Codable, Equatable, Sendable {
     /// anything changed.
     @discardableResult
     public mutating func reconcile(with files: [String]) -> Bool {
+        let excluded = Set(removed ?? [])
+        let files = files.filter { !excluded.contains($0) }
         let present = Set(files)
         let before = pages
         pages.removeAll { !present.contains($0.file) }

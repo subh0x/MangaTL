@@ -26,6 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **Format:** JPEG, PNG or HEIC with a quality setting, at original, working or custom size.
   - **Package:** a folder with a name pattern, a CBZ or a PDF.
   - The last choices are remembered per project.
+- **Delete pages from the sidebar:** ⌘/⇧-click to select several pages, then press Delete or use the right-click menu. The image files stay in the folder.
 - **Lasso tool** (L) in the editor: draw around text the detector missed to read, translate and erase it in one undoable step.
 - **Problems panel** (⇧⌘M): a collapsible bottom panel listing failed translations, exports and edits, and pages with no text found, each with Retry and Go to Page. It opens on new errors, and the status bar shows the counts.
 - **Folder watching:** images added to or removed from a project folder outside the app update the project within a second, in name order.
@@ -37,6 +38,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The reader refreshes a page as soon as its translation finishes. Previously only the most recently created page view was notified.
 - Hovering a control could lose its tooltip when another view disappeared.
 - Translated ✓ marks in the page sidebar appear as soon as a page is translated or saved.
+- The Layers panel's − button deleted the selected image layer even when a text box was selected. It now deletes what is selected. Every text and image row also has its own red delete button and a Delete item in its right-click menu.
+- Pages removed from a project came back on the next folder rescan or reopen. Removed files are now remembered, and Add Images brings them back.
+- Adding an image that is already in the project folder no longer makes a renamed copy of it.
 - The brush-size control in the toolbar had no left padding.
 
 ### Changed

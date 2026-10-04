@@ -3,7 +3,8 @@ import MangaTLCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Collapsible list of the project's pages (reader and editor): click to jump, drag to reorder.
+/// Collapsible list of the project's pages (reader and editor): click to jump, drag to reorder,
+/// ⌘/⇧-click to select several, Delete or the context menu to remove them from the project.
 ///
 /// A lazy stack rather than `List`: List re-diffed all rows whenever the current page changed
 /// (several times a second while reading), which cost ~15% of the main thread at 2500 pages.
@@ -15,16 +16,23 @@ struct PageSidebar: View {
     /// The editor's page, when editing.
     var editorPage: Int?
     var onSelect: (Int) -> Void
+    var onRemove: (IndexSet) -> Void
 
     private var current: Int { editorPage ?? position.page }
     @State private var dropTarget: Int?
+    /// Selected pages by id (indices shift when pages move or are removed).
+    @State private var selection: Set<String> = []
+    @State private var anchor: Int?
+    @State private var confirming: IndexSet?
+    @FocusState private var focused: Bool
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(project.pages.indices, id: \.self) { index in
-                        PageSidebarRow(project: project, index: index, pageID: project.pages[index].id, isCurrent: index == current)
+                        PageSidebarRow(project: project, index: index, pageID: project.pages[index].id, isCurrent: index == current,
+                                       isSelected: selection.contains(project.pages[index].id))
                             .id(index)
                             .overlay(alignment: .top) {
                                 if dropTarget == index {
@@ -32,7 +40,18 @@ struct PageSidebar: View {
                                 }
                             }
                             .contentShape(Rectangle())
-                            .onTapGesture { if index != current { onSelect(index) } }
+                            .onTapGesture { tap(index) }
+                            .contextMenu {
+                                let pages = targets(clicked: index)
+                                Button("Show in Finder") {
+                                    NSWorkspace.shared.activateFileViewerSelecting(pages.map { project.source.folder.appendingPathComponent(project.pages[$0].file) })
+                                }
+                                Divider()
+                                Button(pages.count > 1 ? "Delete \(pages.count) Pages from Project…" : "Delete Page from Project…", role: .destructive) {
+                                    confirming = pages
+                                }
+                                .disabled(pages.count >= project.count)
+                            }
                             .onDrag { NSItemProvider(object: String(index) as NSString) }
                             .onDrop(of: [.text], delegate: PageDrop(index: index, project: project, target: $dropTarget))
                     }
@@ -40,9 +59,59 @@ struct PageSidebar: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .onKeyPress(keys: [.delete, .deleteForward]) { _ in
+                let pages = targets(clicked: nil)
+                guard pages.count < project.count else { return .ignored }
+                confirming = pages
+                return .handled
+            }
             .onAppear { proxy.scrollTo(current, anchor: .center) }
             .onChange(of: current) { _, page in proxy.scrollTo(page) }
+            .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })) {
+                Button("Delete", role: .destructive) {
+                    if let pages = confirming { onRemove(pages) }
+                    confirming = nil
+                    selection = []
+                    anchor = nil
+                }
+            } message: {
+                Text("The pages leave this project and their translations are discarded. The image files stay in the folder; Add Images brings them back.")
+            }
         }
+    }
+
+    private var confirmTitle: String {
+        let n = confirming?.count ?? 0
+        return n == 1 ? "Delete page \((confirming?.first ?? 0) + 1) from the project?" : "Delete \(n) pages from the project?"
+    }
+
+    /// Click: go to the page. ⌘-click: add or remove it from the selection. ⇧-click: select a range.
+    private func tap(_ index: Int) {
+        focused = true
+        let id = project.pages[index].id, flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selection.isEmpty { selection = [project.pages[current].id] }
+            if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
+            anchor = index
+        } else if flags.contains(.shift) {
+            let from = anchor ?? current
+            selection = Set(project.pages[min(from, index)...max(from, index)].map(\.id))
+        } else {
+            selection = [id]
+            anchor = index
+            if index != current { onSelect(index) }
+        }
+    }
+
+    /// Pages an action applies to: the selection when it includes the clicked page (or for keys),
+    /// else just the clicked page; the current page when nothing is selected.
+    private func targets(clicked: Int?) -> IndexSet {
+        let selected = IndexSet(project.pages.indices.filter { selection.contains(project.pages[$0].id) })
+        if let clicked { return selected.contains(clicked) ? selected : [clicked] }
+        return selected.isEmpty ? [current] : selected
     }
 }
 
@@ -102,6 +171,7 @@ private struct PageSidebarRow: View {
     let index: Int
     let pageID: String
     let isCurrent: Bool
+    let isSelected: Bool
     @State private var thumbnail: CGImage?
 
     var body: some View {
@@ -127,7 +197,8 @@ private struct PageSidebarRow: View {
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 6)
-        .background(isCurrent ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .background(isCurrent ? Color.accentColor.opacity(0.25) : isSelected ? Color.accentColor.opacity(0.14) : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
         .task(id: pageID) {
             let cache = project.cache
             let index = index

@@ -145,9 +145,10 @@ private struct LayersPanel: View {
                 Spacer()
                 Button { model.addLayer() } label: { Image(systemName: "plus") }
                     .tip("New image layer for erasing or retouching")
-                Button { if let id = model.activeLayer { model.deleteLayer(id) } } label: { Image(systemName: "minus") }
-                    .disabled(model.activeLayer == nil)
-                    .tip("Delete the selected image layer")
+                // Deletes what is selected: text boxes if any, otherwise the selected image layer.
+                Button { deleteSelection() } label: { Image(systemName: "minus") }
+                    .disabled(model.selection.isEmpty && model.activeLayer == nil)
+                    .tip(model.selection.isEmpty ? "Delete the selected image layer" : "Delete the selected text")
                 Button { if let id = model.activeLayer { model.moveLayer(id, by: 1) } } label: { Image(systemName: "chevron.up") }
                     .disabled(model.activeLayer == nil || model.doc.layers.last?.id == model.activeLayer)
                     .tip("Move layer up")
@@ -163,15 +164,24 @@ private struct LayersPanel: View {
                 Section("Text (\(model.doc.blocks.count))") {
                     ForEach(model.doc.blocks) { block in
                         row(visible: !block.hidden, selected: model.selection.contains(block.id),
-                            symbol: "textformat", title: block.translation.isEmpty ? "Empty text" : block.translation) { visible in
+                            symbol: "textformat", title: block.translation.isEmpty ? "Empty text" : block.translation, kind: "text box") { visible in
                             model.change(visible ? "Show Text" : "Hide Text") { doc in
                                 if let i = doc.blocks.firstIndex(where: { $0.id == block.id }) { doc.blocks[i].hidden = !visible }
                             }
+                        } delete: {
+                            model.selection = [block.id]
+                            model.deleteSelected()
                         }
                         .contentShape(Rectangle())
                         .onTapGesture {
                             model.tool = .select
                             model.select(block.id, extend: NSEvent.modifierFlags.contains(.command) || NSEvent.modifierFlags.contains(.shift))
+                        }
+                        .contextMenu {
+                            Button("Delete Text Box") {
+                                model.select(block.id, extend: model.selection.contains(block.id))
+                                model.deleteSelected()
+                            }
                         }
                     }
                 }
@@ -183,13 +193,23 @@ private struct LayersPanel: View {
                                 TextField("Name", text: Binding(get: { layer.name }, set: { model.renameLayer(layer.id, $0) }))
                                     .onSubmit { renaming = nil }
                             } else {
-                                row(visible: layer.visible, selected: model.activeLayer == layer.id,
-                                    symbol: "photo", title: layer.name) { model.setLayerVisible(layer.id, $0) }
+                                row(visible: layer.visible, selected: model.selection.isEmpty && model.activeLayer == layer.id,
+                                    symbol: "photo", title: layer.name, kind: "layer") { model.setLayerVisible(layer.id, $0) } delete: {
+                                    model.deleteLayer(layer.id)
+                                }
                             }
                         }
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) { renaming = layer.id }
-                        .onTapGesture { model.activate(layer.id) }
+                        .onTapGesture {
+                            // Selecting a layer deselects text, so Delete / − act on the layer.
+                            model.selection = []
+                            model.activate(layer.id)
+                        }
+                        .contextMenu {
+                            Button("Rename") { renaming = layer.id }
+                            Button("Delete Layer") { model.deleteLayer(layer.id) }
+                        }
                     }
                     if model.doc.layers.isEmpty {
                         Text("Brush strokes create a layer automatically.").foregroundStyle(.secondary)
@@ -201,7 +221,16 @@ private struct LayersPanel: View {
         }
     }
 
-    private func row(visible: Bool, selected: Bool, symbol: String, title: String, setVisible: @escaping (Bool) -> Void) -> some View {
+    private func deleteSelection() {
+        if !model.selection.isEmpty {
+            model.deleteSelected()
+        } else if let id = model.activeLayer {
+            model.deleteLayer(id)
+        }
+    }
+
+    private func row(visible: Bool, selected: Bool, symbol: String, title: String, kind: String,
+                     setVisible: @escaping (Bool) -> Void, delete: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Button { setVisible(!visible) } label: {
                 Image(systemName: visible ? "eye" : "eye.slash").foregroundStyle(visible ? .primary : .tertiary)
@@ -211,6 +240,11 @@ private struct LayersPanel: View {
             Image(systemName: symbol).foregroundStyle(.secondary)
             Text(title).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
+            Button(action: delete) {
+                Image(systemName: "trash").foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .tip("Delete this \(kind) (undo with ⌘Z)")
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 4)

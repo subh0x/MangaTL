@@ -122,6 +122,8 @@ struct ContentView: View {
                         position.page = page
                         position.jump = page
                     }
+                } onRemove: { pages in
+                    removePages(pages, from: project)
                 }
                 .frame(width: CGFloat(sidebarWidth))
                 .background(.background.secondary)
@@ -386,6 +388,19 @@ struct ContentView: View {
         }
     }
 
+    /// Takes pages out of the project (the files stay in the folder). The editor, which knows its
+    /// page by index, is reopened on the same page, or on the nearest one left if it was removed.
+    private func removePages(_ pages: IndexSet, from project: ProjectSession) {
+        guard pages.count < project.count else { return }
+        let edited = editor.map { ($0.pageKey, $0.index) }
+        if edited != nil { closeEditor() }
+        project.remove(atOffsets: pages)
+        position.page = min(position.page, project.count - 1)
+        if let (key, index) = edited {
+            edit(project.index(of: key) ?? min(index - pages.filter { $0 < index }.count, project.count - 1))
+        }
+    }
+
     func closeEditor() {
         if let editor, editor.dirty { editor.save() }
         editor = nil
@@ -408,6 +423,7 @@ struct ContentView: View {
     func setReaderZoom(_ zoom: ReaderZoom) { readerZoom = zoom }
     func setSidebar(_ visible: Bool) { sidebarPreferred = visible }
     var problemsShown: Bool { problemsVisible }
+    func removeFromSidebar(_ pages: IndexSet) { if let project { removePages(pages, from: project) } }
     func showProblems(_ visible: Bool) { problemsVisible = visible }
     #endif
 }

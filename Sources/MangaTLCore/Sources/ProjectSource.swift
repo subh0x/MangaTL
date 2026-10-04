@@ -117,14 +117,18 @@ public final class ProjectSource: PageSource, @unchecked Sendable {
         var added: [PageRef] = []
         for url in urls where PageSources.isImageName(url.lastPathComponent) {
             var name = url.lastPathComponent
-            if url.deletingLastPathComponent().standardizedFileURL != folder {
+            // Files already in the folder (e.g. a removed page added back) are added, not copied.
+            if url.deletingLastPathComponent().resolvingSymlinksInPath().path != folder.resolvingSymlinksInPath().path {
                 name = Self.freeName(for: name, in: folder)
                 try FileManager.default.copyItem(at: url, to: folder.appendingPathComponent(name))
             }
             if pages.contains(where: { $0.file == name }) { continue }
             added.append(PageRef(file: name))
         }
-        update { file in file.pages.insert(contentsOf: added, at: min(max(0, index), file.pages.count)) }
+        update { file in
+            file.pages.insert(contentsOf: added, at: min(max(0, index), file.pages.count))
+            file.removed?.removeAll { name in added.contains { $0.file == name } }
+        }
         return added
     }
 
@@ -138,9 +142,11 @@ public final class ProjectSource: PageSource, @unchecked Sendable {
         }
     }
 
-    /// Takes pages out of the project. Their image files and translations stay on disk.
+    /// Takes pages out of the project. Their image files and translations stay on disk, and the
+    /// files aren't picked up again by `rescan` (Add Images brings them back).
     public func remove(atOffsets offsets: IndexSet) {
         update { file in
+            file.removed = (file.removed ?? []) + offsets.map { file.pages[$0].file }
             file.pages = file.pages.enumerated().filter { !offsets.contains($0.offset) }.map(\.element)
         }
     }

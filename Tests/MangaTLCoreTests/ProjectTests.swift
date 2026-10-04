@@ -71,8 +71,13 @@ import Testing
         project.remove(atOffsets: [1])
         #expect(project.count == 3)
         #expect(FileManager.default.fileExists(atPath: fixture.folder.appendingPathComponent("p1 2.jpg").path))
-        // A removed page stays out on reopen? No: files in the folder are reconciled back in.
-        #expect(try ProjectSource(folder: fixture.folder).count == 4)
+        // A removed page stays out on reopen and rescan although its file is still in the folder…
+        #expect(try ProjectSource(folder: fixture.folder).count == 3)
+        #expect(try !project.rescan())
+        // …until it is added back, in place and without a renamed copy.
+        let back = try project.insert(files: [fixture.folder.appendingPathComponent("p1 2.jpg")], at: 1)
+        #expect(back.map(\.file) == ["p1 2.jpg"])
+        #expect(try ProjectSource(folder: fixture.folder).pages.map(\.file) == ["p1.jpg", "p1 2.jpg", "p2.jpg", "p10.jpg"])
     }
 
     @Test func importsWorkFromThePreProjectStore() throws {

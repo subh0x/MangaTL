@@ -37,6 +37,7 @@ and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Changes are listed in [CHANGEL
   - Drag thumbnails to reorder them.
   - Drop image files on the grid, or use **Add Images**, to copy them into the project. Images added to the folder in Finder join the project automatically, in name order.
   - Right-click for Move to Start/End, Translate, Edit, Show in Finder, and Remove from Project (which keeps the file).
+  - In the page sidebar, ⌘/⇧-click selects several pages; Delete (or right-click › Delete) takes them out of the project and keeps the files.
 - **Translate.**
   - Pick the **source language** in the toolbar.
   - ⌘T translates the current page, also from inside the editor, where your own retouch layers are kept. ⇧⌘T translates every untranslated page.
