@@ -268,6 +268,9 @@ enum SmokeRun {
         try? await Task.sleep(for: .milliseconds(500))
         if let reloaded = view.currentEditor {
             let kept = userLayers.allSatisfy { id in reloaded.doc.layers.contains { $0.id == id } }
+            try? await Task.sleep(for: .milliseconds(300))
+            let canvasModel = NSApp.windows.lazy.compactMap { $0.contentView?.firstDescendant(of: CanvasDocumentView.self) }.first?.model
+            log("translate in editor: canvas shows reloaded model \(canvasModel === reloaded),")
             log("translate in editor: reloaded \(reloaded !== editor), \(reloaded.doc.blocks.count) blocks, user layers kept \(kept), cleanup layers \(reloaded.doc.layers.filter { $0.kind == .cleanup }.count)")
             reloaded.selection = Set(reloaded.doc.blocks.prefix(1).map(\.id))
         }

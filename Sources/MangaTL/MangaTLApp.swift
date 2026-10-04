@@ -179,7 +179,8 @@ struct ContentView: View {
     @ViewBuilder private var content: some View {
         if let editor {
             EditorView(model: editor, inspectorPreferred: inspectorVisible)
-                .id(editor.pageKey)
+                // A new model (e.g. reloaded after translating) needs a new canvas: it holds its model.
+                .id(ObjectIdentifier(editor))
         } else if let project {
             PageCollectionView(project: project, mode: mode, showOriginal: showOriginal, position: position,
                                gridSize: CGFloat(gridSize), readerZoom: readerZoom) { page in
