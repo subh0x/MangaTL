@@ -24,7 +24,7 @@ struct LanguageMenu: View {
                 .labelStyle(.titleAndIcon)
                 .lineLimit(1)
         }
-        .help("Language the manga is written in")
+        .tip("Language the manga is written in")
     }
 }
 
@@ -73,7 +73,7 @@ struct TranslateMenu: View {
         } label: {
             Label("Translate", systemImage: "translate")
         }
-        .help("Detect, read, translate and letter pages on this Mac (⌘T: this page)")
+        .tip("Detect, read, translate and letter pages on this Mac (⌘T: this page)")
     }
 
     private func translateCurrentPage() {
@@ -106,11 +106,13 @@ struct TranslateMenu: View {
 }
 
 /// Bottom bar, shown in every mode: activity on the left, page and memory on the right.
-struct StatusBar: View {
+struct StatusBar<Trailing: View>: View {
     let project: ProjectSession?
     let position: ReadingPosition?
     /// Editor work in progress (e.g. "Healing…").
     var activity: String?
+    /// Mode-specific controls next to the page counter (zoom).
+    @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
         HStack(spacing: 12) {
@@ -122,6 +124,7 @@ struct StatusBar: View {
                 Text(activity).foregroundStyle(.secondary).lineLimit(1).fixedSize()
             }
             Spacer(minLength: 0)
+            trailing()
             if let project, let position {
                 PageIndicator(position: position, count: project.count)
                 Divider().frame(height: 12)
@@ -161,6 +164,8 @@ struct TranslationStatus: View {
 /// so scrolling re-renders that label instead of the whole window.
 @Observable final class ReadingPosition {
     var page = 0
+    /// Set to scroll the grid/reader to a page (consumed by the collection view).
+    var jump: Int?
 }
 
 struct PageIndicator: View {
@@ -185,7 +190,7 @@ struct FootprintLabel: View {
             .fixedSize()
             .monospacedDigit()
             .foregroundStyle(.secondary)
-            .help("Memory footprint of this app")
+            .tip("Memory footprint of this app")
             .task {
                 while !Task.isCancelled {
                     megabytes = MemoryFootprint.megabytes()

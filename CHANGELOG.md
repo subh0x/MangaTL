@@ -14,6 +14,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **New style options:** bold and italic faces, width and height scale, space inside the balloon, auto-fit scale.
   - **Typeset Check:** warns about text that doesn't fit, size outliers on a page, a lone short word on the last line, mixed fixed sizes within a role, and text touching the edge. One-click fixes are offered where possible. It appears in the editor's inspector and project-wide (⇧⌘K).
 
+- **Page sidebar** in the reader and editor: numbered thumbnails with ✓ on translated pages. Click to jump; drag to reorder. Toggle with ⌃⌘S; it collapses on its own in narrow windows.
+- **Zoom:**
+  - Grid thumbnail size (90–360 pt) and reader page width (Fit Width, Fit Height, or a set width) from the status bar, ⌘± / ⌘0, or a trackpad pinch.
+  - The editor toolbar gains Fit Width and Fit Height.
+  - Reader zoom is remembered per project.
+  - Large grid sizes use sharper 640 px thumbnails.
+- **Tooltips:** compact dark tooltips that appear after about 0.3 s (instead of about 1 s) and show the keyboard shortcut.
+- **Editor brush colour:** in the toolbar it is now a small swatch that opens a popover with the colour picker, hex field and recent colours.
+
+### Fixed
+- The reader refreshes a page as soon as its translation finishes. Previously only the most recently created page view was notified.
+- Hovering a control could lose its tooltip when another view disappeared.
+
 ### Changed
 - The outline is drawn outside the glyphs. New projects letter dialogue without an outline by default.
 

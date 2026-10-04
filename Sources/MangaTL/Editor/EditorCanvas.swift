@@ -6,20 +6,21 @@ import SwiftUI
 struct EditorCanvas: NSViewRepresentable {
     let model: EditorModel
 
-    enum ZoomCommand { case fit, zoomIn, zoomOut, actual }
+    enum ZoomCommand { case fit, fitWidth, fitHeight, zoomIn, zoomOut, actual }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     /// Keeps the page fitted to the canvas while the window resizes, until the user zooms.
     final class Coordinator: NSObject {
-        var fitted = true
+        /// The fit the page follows while the window resizes (nil once the user zooms by hand).
+        var fit: ZoomCommand? = .fit
         weak var scroll: NSScrollView?
 
         @objc func resized(_ note: Notification) {
-            if fitted, let scroll { EditorCanvas.fit(scroll) }
+            if let fit, let scroll { EditorCanvas.apply(fit, to: scroll) }
         }
 
-        @objc func userZoomed(_ note: Notification) { fitted = false }
+        @objc func userZoomed(_ note: Notification) { fit = nil }
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -49,21 +50,26 @@ struct EditorCanvas: NSViewRepresentable {
         _ = (model.doc, model.selection, model.tool, model.pixelsVersion, model.brushSize, model.cloneSource, model.activeLayer, model.project.settings)
         scroll.documentView?.needsDisplay = true
         if let command = model.zoomCommand {
-            context.coordinator.fitted = command == .fit
-            switch command {
-            case .fit: Self.fit(scroll)
-            case .zoomIn: scroll.animator().magnification = min(scroll.maxMagnification, scroll.magnification * 1.25)
-            case .zoomOut: scroll.animator().magnification = max(scroll.minMagnification, scroll.magnification / 1.25)
-            case .actual: scroll.animator().magnification = 1
-            }
+            context.coordinator.fit = [.fit, .fitWidth, .fitHeight].contains(command) ? command : nil
+            Self.apply(command, to: scroll)
             DispatchQueue.main.async { model.zoomCommand = nil }
         }
     }
 
-    static func fit(_ scroll: NSScrollView) {
+    static func fit(_ scroll: NSScrollView) { apply(.fit, to: scroll) }
+
+    static func apply(_ command: ZoomCommand, to scroll: NSScrollView) {
         guard let doc = scroll.documentView, doc.frame.width > 0 else { return }
         let visible = scroll.contentSize
-        scroll.magnification = min(visible.width / doc.frame.width, visible.height / doc.frame.height) * 0.98
+        let width = visible.width / doc.frame.width, height = visible.height / doc.frame.height
+        switch command {
+        case .fit: scroll.magnification = min(width, height) * 0.98
+        case .fitWidth: scroll.magnification = width * 0.98
+        case .fitHeight: scroll.magnification = height * 0.98
+        case .zoomIn: scroll.animator().magnification = min(scroll.maxMagnification, scroll.magnification * 1.25)
+        case .zoomOut: scroll.animator().magnification = max(scroll.minMagnification, scroll.magnification / 1.25)
+        case .actual: scroll.animator().magnification = 1
+        }
     }
 }
 

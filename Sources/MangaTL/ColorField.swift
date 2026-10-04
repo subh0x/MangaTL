@@ -29,7 +29,7 @@ struct ColorField: View {
                 .frame(width: 18, height: 18)
         }
         .buttonStyle(.borderless)
-        .help("Brush colour \(color.hex)")
+        .tip("Brush colour \(color.hex)")
         .popover(isPresented: $showingPopover, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 10) {
                 inline
@@ -42,7 +42,7 @@ struct ColorField: View {
                                 .frame(width: 18, height: 18)
                         }
                         .buttonStyle(.borderless)
-                        .help(swatch.hex)
+                        .tip(swatch.hex)
                     }
                 }
             }
@@ -62,7 +62,7 @@ struct ColorField: View {
                 .textFieldStyle(.roundedBorder)
                 .foregroundStyle(invalid ? .red : .primary)
                 .onSubmit(apply)
-                .help("Hex colour, e.g. #1A2B3C or #FFF")
+                .tip("Hex colour, e.g. #1A2B3C or #FFF")
         }
         .onAppear { text = color.hex }
         .onChange(of: color) { _, new in

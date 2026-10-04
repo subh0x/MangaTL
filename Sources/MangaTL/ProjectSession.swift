@@ -20,8 +20,8 @@ final class ProjectSession {
     private(set) var lastError: String?
     /// Set when translation finishes a page, so an open editor can reload it.
     private(set) var lastTranslated: (page: String, token: Int)?
-    @ObservationIgnored var onPageChanged: (Int) -> Void = { _ in }
-    @ObservationIgnored var onPagesReordered: () -> Void = {}
+    /// Views that re-render pages; held weakly (SwiftUI may create and discard several).
+    @ObservationIgnored private var observers: [PageObserver] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var stateWrite: Task<Void, Never>?
 
@@ -106,10 +106,20 @@ final class ProjectSession {
         pageChanged(index)
     }
 
-    func pageChanged(_ index: Int) { onPageChanged(index) }
+    func pageChanged(_ index: Int) { liveObservers.forEach { $0.pageChanged(index) } }
 
     /// Presets changed: every page's lettering may look different.
-    func stylesChanged() { onPagesReordered() }
+    func stylesChanged() { liveObservers.forEach { $0.pagesChanged() } }
+
+    func addObserver(_ owner: AnyObject, pageChanged: @escaping (Int) -> Void, pagesChanged: @escaping () -> Void) {
+        observers.removeAll { $0.owner == nil || $0.owner === owner }
+        observers.append(PageObserver(owner: owner, pageChanged: pageChanged, pagesChanged: pagesChanged))
+    }
+
+    private var liveObservers: [PageObserver] {
+        observers.removeAll { $0.owner == nil }
+        return observers
+    }
 
     func dismissError() { lastError = nil }
 
@@ -139,30 +149,31 @@ final class ProjectSession {
 
     private func pagesChanged() {
         pages = source.pages
-        onPagesReordered()
+        liveObservers.forEach { $0.pagesChanged() }
     }
 
     // MARK: State
 
-    /// Remembers where the user is; written at most once a second.
-    func rememberState(page: Int, mode: String) {
+    /// Remembers where the user is (page, mode, zoom); written at most once a second.
+    func rememberState(_ state: ProjectFile.State) {
         stateWrite?.cancel()
         stateWrite = Task {
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
-            var state = ProjectFile.State()
-            state.page = page
-            state.mode = mode
             source.state = state
         }
     }
 
-    func close(page: Int, mode: String) {
+    func close(state: ProjectFile.State) {
         cancel()
         stateWrite?.cancel()
-        var state = ProjectFile.State()
-        state.page = page
-        state.mode = mode
         source.state = state
     }
+}
+
+/// A weakly held view that re-renders when pages change.
+struct PageObserver {
+    weak var owner: AnyObject?
+    let pageChanged: (Int) -> Void
+    let pagesChanged: () -> Void
 }

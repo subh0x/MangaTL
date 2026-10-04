@@ -116,3 +116,37 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: missing.path))
     }
 }
+
+@Suite struct ZoomAndThumbnailTierTests {
+    @Test func zoomStateRoundTrips() throws {
+        let fixture = try Fixture()
+        let project = try ProjectSource(folder: fixture.folder)
+        var state = ProjectFile.State()
+        state.mode = "reader"
+        state.zoom = 1350
+        project.state = state
+        #expect(try ProjectSource(folder: fixture.folder).state.zoom == 1350)
+        state.zoom = nil
+        state.fit = "height"
+        project.state = state
+        let reopened = try ProjectSource(folder: fixture.folder).state
+        #expect(reopened.fit == "height" && reopened.zoom == nil)
+        // Files written before zoom existed still load.
+        let old = #"{"page":3,"mode":"grid"}"#
+        let decoded = try JSONDecoder().decode(ProjectFile.State.self, from: Data(old.utf8))
+        #expect(decoded.page == 3 && decoded.zoom == nil && decoded.fit == nil)
+    }
+
+    @Test func largeThumbnailsAreASeparateTier() throws {
+        let fixture = try Fixture()
+        let source = try ProjectSource(folder: fixture.folder)
+        let root = fixture.root.appendingPathComponent("thumbs")
+        let cache = ThumbnailCache(source: source, root: root)
+        let small = try cache.load(0)
+        let large = try cache.load(0, large: true)
+        #expect(max(small.width, small.height) == ThumbnailCache.maxPixelSize)
+        #expect(max(large.width, large.height) == ThumbnailCache.largePixelSize)
+        let files = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasSuffix(".heic") }
+        #expect(files.count == 2)
+    }
+}

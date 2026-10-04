@@ -9,6 +9,23 @@ import QuartzCore
 @MainActor
 final class ScrollBenchmark: NSObject {
     static var bookPath: String? { ProcessInfo.processInfo.environment["MANGATL_BENCH"] }
+    nonisolated(unsafe) static var running: ScrollBenchmark?
+
+    /// Starts on the page grid that is actually in the window (SwiftUI may create and discard
+    /// collection views while building the split view).
+    static func start(openReader: @escaping () -> Void) async {
+        for _ in 0..<50 {
+            if let grid = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: PageGridView.self) }).first,
+               let scroll = grid.enclosingScrollView, grid.window != nil {
+                running = ScrollBenchmark(scroll: scroll, openReader: openReader)
+                running?.start()
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        print("BENCH failed: no page grid")
+        NSApp.terminate(nil)
+    }
 
     private weak var scroll: NSScrollView?
     private let openReader: () -> Void
@@ -155,6 +172,43 @@ enum SmokeRun {
         log("translated \(project.translatedCount) pages, peak \(Int(peak)) MB, error \(project.lastError ?? "none")")
         await snapshot(width: 1000, name: "reader")
 
+        // Sidebar open / collapsed / narrow window, reader fit modes.
+        view.setSidebar(true)
+        try? await Task.sleep(for: .milliseconds(600))
+        await snapshot(width: 1200, name: "reader_sidebar")
+        view.setReaderZoom(.fitHeight)
+        await snapshot(width: 1200, name: "reader_fitheight")
+        view.setReaderZoom(.fitWidth)
+        await snapshot(width: 1200, name: "reader_fitwidth")
+        view.setReaderZoom(.column(ReaderLayout.defaultColumnWidth))
+        await snapshot(width: 820, name: "reader_narrow")
+        view.setSidebar(false)
+        await snapshot(width: 1200, name: "reader_nosidebar")
+        view.setSidebar(true)
+
+        // Grid sizes.
+        view.showGrid()
+        for size in [90.0, 160, 360] {
+            view.setGridSize(size)
+            await snapshot(width: 1200, name: "grid_\(Int(size))")
+        }
+        view.setGridSize(150)
+        view.showReader()
+
+        // Tooltip: appears after ~300 ms (measured once the window is idle).
+        try? await Task.sleep(for: .seconds(1.5))
+        let start = Date()
+        TooltipPresenter.shared.schedule("Translate this page", shortcut: "⌘T")
+        while !TooltipPresenter.shared.isVisible, Date().timeIntervalSince(start) < 2 { try? await Task.sleep(for: .milliseconds(5)) }
+        log(String(format: "tooltip visible after %.0f ms", Date().timeIntervalSince(start) * 1000))
+        try? await Task.sleep(for: .milliseconds(200))
+        let tipView = TooltipPresenter.shared.contentView
+        if let rep = tipView.bitmapImageRepForCachingDisplay(in: tipView.bounds) {
+            tipView.cacheDisplay(in: tipView.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_tooltip.png"))
+        }
+        TooltipPresenter.shared.hide()
+
         for which in [ProjectSheet.presets, .typesetCheck] {
             view.show(which)
             try? await Task.sleep(for: .seconds(1.5))
@@ -167,6 +221,17 @@ enum SmokeRun {
         try? await Task.sleep(for: .milliseconds(500))
         guard let editor = view.currentEditor else { log("no editor"); NSApp.terminate(nil); return }
         await edit(editor, canvasSnapshot: copy.appendingPathComponent("../mangatl_editor_canvas.jpg").standardized)
+        for fit in [EditorCanvas.ZoomCommand.fitWidth, .fitHeight] {
+            editor.zoomCommand = fit
+            try? await Task.sleep(for: .milliseconds(500))
+            if let canvas = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: CanvasDocumentView.self) }).first,
+               let scroll = canvas.enclosingScrollView {
+                let target = fit == .fitWidth ? scroll.contentSize.width / canvas.frame.width : scroll.contentSize.height / canvas.frame.height
+                log(String(format: "editor %@: magnification %.3f vs %.3f (%.1f%% off)", "\(fit)", scroll.magnification, target * 0.98,
+                           abs(scroll.magnification / (target * 0.98) - 1) * 100))
+            }
+        }
+        editor.zoomCommand = .fit
 
         // Translate again from inside the editor: user layers must survive, editor reloads.
         if editor.dirty { editor.save() }

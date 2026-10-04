@@ -5,7 +5,16 @@ import AppKit
 /// (microseconds for thousands of pages) and visible-rect queries are a binary search —
 /// `NSCollectionViewFlowLayout` instead re-queries every item on each invalidation.
 final class ReaderLayout: NSCollectionViewLayout {
-    static let maxColumnWidth: CGFloat = 900
+    static let defaultColumnWidth: CGFloat = 900
+    static let columnRange: ClosedRange<CGFloat> = 400...2400
+    /// The reader's zoom: page width in points (capped by the window width).
+    var columnLimit: CGFloat = ReaderLayout.defaultColumnWidth {
+        didSet {
+            guard columnLimit != oldValue else { return }
+            aspects = []   // every height changes; prepare() recomputes
+            invalidateLayout()
+        }
+    }
     static let spacing: CGFloat = 8
     static let defaultAspect: CGFloat = 0.7
 
@@ -16,7 +25,7 @@ final class ReaderLayout: NSCollectionViewLayout {
     private var offsets: [CGFloat] = []   // top of each page
     private var width: CGFloat = 0
 
-    var columnWidth: CGFloat { min(width, Self.maxColumnWidth) }
+    var columnWidth: CGFloat { min(width, columnLimit) }
 
     override func prepare() {
         super.prepare()

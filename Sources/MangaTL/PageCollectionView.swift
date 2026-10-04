@@ -3,6 +3,13 @@ import IOSurface
 import MangaTLCore
 import SwiftUI
 
+/// Reader zoom: a fixed page width, or fitted to the window.
+enum ReaderZoom: Equatable {
+    case column(CGFloat)
+    case fitWidth
+    case fitHeight
+}
+
 enum PageLayoutMode: Equatable {
     /// Thumbnail grid of the whole project.
     case grid
@@ -18,8 +25,14 @@ struct PageCollectionView: NSViewRepresentable {
     /// Reader shows untranslated originals when true.
     var showOriginal = false
     let position: ReadingPosition
+    /// Grid thumbnail width in points.
+    var gridSize: CGFloat = 150
+    var readerZoom: ReaderZoom = .column(ReaderLayout.defaultColumnWidth)
     var onOpenPage: (Int) -> Void
     var onEditPage: (Int) -> Void = { _ in }
+    /// Trackpad pinch: new grid size, or new reader zoom.
+    var onGridSize: (CGFloat) -> Void = { _ in }
+    var onReaderZoom: (ReaderZoom) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -35,6 +48,7 @@ struct PageCollectionView: NSViewRepresentable {
         collection.registerForDraggedTypes([PageGridView.pageType, .fileURL])
         collection.setDraggingSourceOperationMask(.move, forLocal: true)
         collection.menuProvider = { [weak coordinator = context.coordinator] index in coordinator?.menu(for: index) }
+        collection.addGestureRecognizer(NSMagnificationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinched(_:))))
         let click = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleClicked(_:)))
         click.numberOfClicksRequired = 2
         click.delaysPrimaryMouseButtonEvents = false
@@ -44,17 +58,15 @@ struct PageCollectionView: NSViewRepresentable {
         scroll.documentView = collection
         scroll.hasVerticalScroller = true
         scroll.contentView.postsBoundsChangedNotifications = true
+        scroll.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.resized(_:)),
+                                               name: NSView.frameDidChangeNotification, object: scroll)
         NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.scrolled(_:)),
                                                name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         context.coordinator.collection = collection
+        context.coordinator.setGridSize(gridSize, anchor: false)
+        context.coordinator.readerZoom = readerZoom
         context.coordinator.apply(mode: mode, scrollTo: position.page)
-        #if DEBUG || BENCH
-        if ScrollBenchmark.bookPath != nil {
-            let coordinator = context.coordinator
-            coordinator.benchmark = ScrollBenchmark(scroll: scroll) { coordinator.parent.onOpenPage(0) }
-            coordinator.benchmark?.start()
-        }
-        #endif
         return scroll
     }
 
@@ -64,7 +76,20 @@ struct PageCollectionView: NSViewRepresentable {
         if coordinator.project !== project || coordinator.mode != mode || coordinator.showOriginal != showOriginal {
             coordinator.project = project
             coordinator.showOriginal = showOriginal
+            coordinator.setGridSize(gridSize, anchor: false)
+            coordinator.readerZoom = readerZoom
             coordinator.apply(mode: mode, scrollTo: position.page)
+        } else {
+            coordinator.setGridSize(gridSize, anchor: true)
+            if coordinator.readerZoom != readerZoom {
+                coordinator.readerZoom = readerZoom
+                coordinator.applyReaderZoom()
+            }
+        }
+        // Sidebar / page-number jumps.
+        if let target = position.jump {
+            DispatchQueue.main.async { position.jump = nil }
+            coordinator.scroll(toPage: target)
         }
     }
 
@@ -78,9 +103,6 @@ struct PageCollectionView: NSViewRepresentable {
         var mode: PageLayoutMode
         var showOriginal: Bool
         weak var collection: NSCollectionView?
-        #if DEBUG || BENCH
-        var benchmark: ScrollBenchmark?
-        #endif
         /// Two decode workers keep scrolling responsive without flooding memory.
         let queue: OperationQueue = {
             let q = OperationQueue()
@@ -97,6 +119,9 @@ struct PageCollectionView: NSViewRepresentable {
             return layout
         }()
         private let readerLayout = ReaderLayout()
+        var readerZoom: ReaderZoom = .column(ReaderLayout.defaultColumnWidth)
+        private var gridSize: CGFloat = 150
+        private var pinchStart: CGFloat = 0
         /// Reader page aspect ratios learned from full decodes (thumbnails fill the rest).
         private var readerAspects: [Int: CGFloat] = [:]
         private var focusUpdatePending = false
@@ -114,14 +139,81 @@ struct PageCollectionView: NSViewRepresentable {
 
         /// Re-renders a page in place when its translation changes.
         private func observe(_ project: ProjectSession) {
-            project.onPagesReordered = { [weak self] in
+            project.addObserver(self) { [weak self] index in
+                guard let self, let collection = self.collection, index >= 0, index < collection.numberOfItems(inSection: 0) else { return }
+                collection.reloadItems(at: [IndexPath(item: index, section: 0)])
+            } pagesChanged: { [weak self] in
                 guard let self else { return }
                 self.readerAspects = [:]
                 self.collection?.reloadData()
             }
-            project.onPageChanged = { [weak self] index in
-                guard let self, let collection = self.collection, index < collection.numberOfItems(inSection: 0) else { return }
-                collection.reloadItems(at: [IndexPath(item: index, section: 0)])
+        }
+
+        // MARK: Zoom
+
+        /// Grid thumbnail width; with `anchor`, the top visible page stays in view.
+        func setGridSize(_ size: CGFloat, anchor: Bool) {
+            guard size != gridSize || gridLayout.itemSize.width != size else { return }
+            let top = anchor && mode == .grid ? collection?.indexPathsForVisibleItems().map(\.item).min() : nil
+            let reloadTier = (gridSize > 170) != (size > 170)
+            gridSize = size
+            gridLayout.itemSize = NSSize(width: size.rounded(), height: (size * 1.42).rounded() + 20)
+            gridLayout.minimumInteritemSpacing = max(8, size * 0.08)
+            gridLayout.minimumLineSpacing = max(10, size * 0.1)
+            guard mode == .grid, let collection else { return }
+            if reloadTier { collection.reloadData() } else { gridLayout.invalidateLayout() }
+            if let top {
+                collection.layoutSubtreeIfNeeded()
+                collection.scrollToItems(at: [IndexPath(item: top, section: 0)], scrollPosition: .top)
+            }
+        }
+
+        /// Turns the reader zoom into a page width for the current window and keeps the top page in view.
+        func applyReaderZoom() {
+            guard let collection, let scroll = collection.enclosingScrollView else { return }
+            let visible = scroll.contentSize
+            let top = readerLayout.index(atY: scroll.contentView.bounds.minY + 1)
+            let column: CGFloat = switch readerZoom {
+            case .column(let width): width
+            case .fitWidth: visible.width
+            case .fitHeight:
+                (visible.height - 2 * ReaderLayout.spacing) * (readerAspects[top] ?? cache.aspect(top) ?? ReaderLayout.defaultAspect)
+            }
+            let clamped = min(max(column, 200), 4000)
+            guard abs(readerLayout.columnLimit - clamped) > 0.5 else { return }
+            readerLayout.columnLimit = clamped
+            guard mode == .reader else { return }
+            collection.reloadData()   // decode size follows the width
+            collection.layoutSubtreeIfNeeded()
+            collection.scroll(NSPoint(x: 0, y: readerLayout.top(of: top) - ReaderLayout.spacing))
+        }
+
+        func scroll(toPage page: Int) {
+            guard let collection, page >= 0, page < project.count else { return }
+            collection.layoutSubtreeIfNeeded()
+            switch mode {
+            case .grid: collection.scrollToItems(at: [IndexPath(item: page, section: 0)], scrollPosition: .centeredVertically)
+            case .reader: collection.scroll(NSPoint(x: 0, y: readerLayout.top(of: page) - ReaderLayout.spacing))
+            }
+        }
+
+        @objc func resized(_ note: Notification) {
+            if mode == .reader, readerZoom != .column(readerLayout.columnLimit) { applyReaderZoom() }
+        }
+
+        /// Trackpad pinch: grid thumbnail size, or reader page width.
+        @objc func pinched(_ gesture: NSMagnificationGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                pinchStart = mode == .grid ? gridSize : readerLayout.columnWidth
+            case .changed, .ended:
+                let value = pinchStart * (1 + gesture.magnification)
+                if mode == .grid {
+                    parent.onGridSize(min(max(value, 90), 360))
+                } else {
+                    parent.onReaderZoom(.column(min(max(value, ReaderLayout.columnRange.lowerBound), ReaderLayout.columnRange.upperBound)))
+                }
+            default: break
             }
         }
 
@@ -131,6 +223,11 @@ struct PageCollectionView: NSViewRepresentable {
             readerAspects = [:]
             guard let collection else { return }
             collection.collectionViewLayout = mode == .grid ? gridLayout : readerLayout
+            if mode == .reader {
+                // Width for the zoom before the first layout.
+                if case .column(let width) = readerZoom { readerLayout.columnLimit = width }
+                DispatchQueue.main.async { self.applyReaderZoom() }
+            }
             collection.reloadData()
             let count = project.count
             guard count > 0 else { return }
@@ -150,15 +247,16 @@ struct PageCollectionView: NSViewRepresentable {
 
         func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
             let item = collectionView.makeItem(withIdentifier: PageItem.identifier, for: indexPath) as! PageItem
+            let large = gridSize > 170
             let index = indexPath.item
             let translated = project.isTranslated(index)
             item.configure(index: index, caption: mode == .grid ? (translated ? "\(index + 1) ✓" : "\(index + 1)") : nil)
             switch mode {
             case .grid:
-                if let image = cache.cached(index) {
+                if let image = cache.cached(index, large: large) {
                     item.show(image)
                 } else {
-                    load(into: item, index: index) { [cache] in try cache.load(index) }
+                    load(into: item, index: index) { [cache] in try cache.load(index, large: large) }
                 }
             case .reader:
                 let pixels = readerPixelSize(collectionView)

@@ -48,17 +48,17 @@ struct EditorToolbar: ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button { onClose() } label: { Label("Done", systemImage: "checkmark") }
                 .keyboardShortcut(.return, modifiers: .command)
-                .help("Save and return to the pages (⌘↩)")
+                .tip("Save and return to the pages", shortcut: "⌘↩")
         }
         ToolbarItemGroup(placement: .navigation) {
             Button { onOpenPage(model.index - 1) } label: { Label("Previous Page", systemImage: "chevron.left") }
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(model.index == 0)
-                .help("Previous page, saving this one (⌘[)")
+                .tip("Previous page, saving this one", shortcut: "⌘[")
             Button { onOpenPage(model.index + 1) } label: { Label("Next Page", systemImage: "chevron.right") }
                 .keyboardShortcut("]", modifiers: .command)
                 .disabled(model.index + 1 >= pageCount)
-                .help("Next page, saving this one (⌘])")
+                .tip("Next page, saving this one", shortcut: "⌘]")
         }
         ToolbarItem {
             Picker("Tool", selection: $model.tool) {
@@ -67,7 +67,7 @@ struct EditorToolbar: ToolbarContent {
                 }
             }
             .pickerStyle(.segmented)
-            .help("Text (T) · Erase (E) · Heal (H) · Clone (C) · Unpaint (R)")
+            .tip("Text (T) · Erase (E) · Heal (H) · Clone (C) · Unpaint (R)")
         }
         if model.tool != .select {
             ToolbarItem {
@@ -79,7 +79,7 @@ struct EditorToolbar: ToolbarContent {
                         .lineLimit(1)
                         .frame(width: 52, alignment: .leading)
                 }
-                .help("Brush size ([ and ])")
+                .tip("Brush size ([ and ])")
             }
         }
         if model.tool == .erase {
@@ -90,7 +90,7 @@ struct EditorToolbar: ToolbarContent {
                         Label("Auto Colour", systemImage: "eyedropper")
                     }
                     .toggleStyle(.button)
-                    .help("Auto: use the colour under the start of each stroke")
+                    .tip("Auto: use the colour under the start of each stroke")
                     // Picking a colour turns Auto off.
                     ColorField(color: Binding(get: { model.brushColor ?? .white }, set: { model.brushColor = $0 }), style: .compact)
                         .opacity(model.brushColor == nil ? 0.45 : 1)
@@ -100,22 +100,26 @@ struct EditorToolbar: ToolbarContent {
         ToolbarSpacer(.fixed)
         ToolbarItemGroup {
             Button { model.undo.undo() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                .keyboardShortcut("z").disabled(!model.undo.canUndo).help("Undo (⌘Z)")
+                .keyboardShortcut("z").disabled(!model.undo.canUndo).tip("Undo", shortcut: "⌘Z")
             Button { model.undo.redo() } label: { Label("Redo", systemImage: "arrow.uturn.forward") }
-                .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.undo.canRedo).help("Redo (⇧⌘Z)")
+                .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!model.undo.canRedo).tip("Redo", shortcut: "⇧⌘Z")
         }
         ToolbarItemGroup {
             Button { model.zoomCommand = .zoomOut } label: { Label("Zoom Out", systemImage: "minus.magnifyingglass") }
-                .keyboardShortcut("-").help("Zoom out (⌘-)")
+                .keyboardShortcut("-").tip("Zoom out", shortcut: "⌘-")
             Button { model.zoomCommand = .fit } label: { Label("Fit Page", systemImage: "arrow.up.left.and.down.right.magnifyingglass") }
-                .keyboardShortcut("0").help("Fit page (⌘0)")
+                .keyboardShortcut("0").tip("Fit page", shortcut: "⌘0")
+            Button { model.zoomCommand = .fitWidth } label: { Label("Fit Width", systemImage: "arrow.left.and.right.square") }
+                .tip("Fit width")
+            Button { model.zoomCommand = .fitHeight } label: { Label("Fit Height", systemImage: "arrow.up.and.down.square") }
+                .tip("Fit height")
             Button { model.zoomCommand = .zoomIn } label: { Label("Zoom In", systemImage: "plus.magnifyingglass") }
-                .keyboardShortcut("=").help("Zoom in (⌘=)")
+                .keyboardShortcut("=").tip("Zoom in", shortcut: "⌘=")
         }
         ToolbarItem {
             Toggle(isOn: $inspectorVisible) { Label("Inspector", systemImage: "sidebar.right") }
                 .keyboardShortcut("i", modifiers: [.command, .option])
-                .help("Show or hide the layers and inspector panel (⌥⌘I)")
+                .tip("Show or hide the layers and inspector panel", shortcut: "⌥⌘I")
         }
     }
 }
@@ -132,16 +136,16 @@ private struct LayersPanel: View {
                 Text("Layers").font(.headline)
                 Spacer()
                 Button { model.addLayer() } label: { Image(systemName: "plus") }
-                    .help("New image layer for erasing or retouching")
+                    .tip("New image layer for erasing or retouching")
                 Button { if let id = model.activeLayer { model.deleteLayer(id) } } label: { Image(systemName: "minus") }
                     .disabled(model.activeLayer == nil)
-                    .help("Delete the selected image layer")
+                    .tip("Delete the selected image layer")
                 Button { if let id = model.activeLayer { model.moveLayer(id, by: 1) } } label: { Image(systemName: "chevron.up") }
                     .disabled(model.activeLayer == nil || model.doc.layers.last?.id == model.activeLayer)
-                    .help("Move layer up")
+                    .tip("Move layer up")
                 Button { if let id = model.activeLayer { model.moveLayer(id, by: -1) } } label: { Image(systemName: "chevron.down") }
                     .disabled(model.activeLayer == nil || model.doc.layers.first?.id == model.activeLayer)
-                    .help("Move layer down")
+                    .tip("Move layer down")
             }
             .buttonStyle(.borderless)
             .padding(.horizontal, 12)
@@ -195,7 +199,7 @@ private struct LayersPanel: View {
                 Image(systemName: visible ? "eye" : "eye.slash").foregroundStyle(visible ? .primary : .tertiary)
             }
             .buttonStyle(.borderless)
-            .help(visible ? "Hide" : "Show")
+            .tip(visible ? "Hide" : "Show")
             Image(systemName: symbol).foregroundStyle(.secondary)
             Text(title).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
@@ -220,7 +224,7 @@ struct Inspector: View {
                     Section("Original") {
                         TextEditor(text: blockBinding(\.sourceText, "Edit Original", first)).frame(minHeight: 44).font(.body)
                         HStack {
-                            Button("Read Again") { model.rereadSelected() }.help("Run OCR again on the original lettering")
+                            Button("Read Again") { model.rereadSelected() }.tip("Run OCR again on the original lettering")
                             Button("Translate") { model.retranslateSelected() }.disabled(first.sourceText.isEmpty)
                         }
                     }
@@ -240,17 +244,17 @@ struct Inspector: View {
                         set: { role in model.updateSelected("Role") { $0.role = role == .dialogue ? nil : role } })) {
                         ForEach(TextRole.allCases) { Text($0.displayName).tag($0) }
                     }
-                    .help("Each role has its own style preset (Translate › Typesetting Presets…)")
+                    .tip("Each role has its own style preset (Translate › Typesetting Presets…)")
                 }
                 Section("Font") {
                     fontPicker(first)
                     HStack {
                         Toggle(isOn: styleBinding(\.bold, "Bold", first)) { Image(systemName: "bold") }
                             .toggleStyle(.button)
-                            .help("Bold face (if the font has one)")
+                            .tip("Bold face (if the font has one)")
                         Toggle(isOn: styleBinding(\.italic, "Italic", first)) { Image(systemName: "italic") }
                             .toggleStyle(.button)
-                            .help("Italic face, e.g. for thoughts")
+                            .tip("Italic face, e.g. for thoughts")
                         Spacer()
                     }
                     sizeControl(blocks)
@@ -267,15 +271,15 @@ struct Inspector: View {
                     LabeledContent("Width") {
                         percentSlider(styleBinding(\.horizontalScale, "Width", first), in: 0.7...1.3)
                     }
-                    .help("Narrow wide lines (about 90%) without changing the size")
+                    .tip("Narrow wide lines (about 90%) without changing the size")
                     LabeledContent("Height") {
                         percentSlider(styleBinding(\.verticalScale, "Height", first), in: 0.8...1.6)
                     }
-                    .help("Taller letters for shouting (120–150%)")
+                    .tip("Taller letters for shouting (120–150%)")
                     LabeledContent("Space inside") {
                         percentSlider(styleBinding(\.padding, "Space Inside", first), in: 0...0.3)
                     }
-                    .help("Empty space kept between the text and the balloon edge")
+                    .tip("Empty space kept between the text and the balloon edge")
                 }
                 Section("Colour") {
                     LabeledContent("Text") { ColorField(color: styleBinding(\.color, "Text Colour", first)) }
@@ -299,7 +303,7 @@ struct Inspector: View {
                 Section {
                     let role = current(first).role ?? .dialogue
                     Button("Use This Style for All \(role.displayName) Text") { model.useAsPreset(current(first)) }
-                        .help("Saves it as the project's \(role.displayName) preset and applies it to every \(role.displayName.lowercased()) box on this page")
+                        .tip("Saves it as the project's \(role.displayName) preset and applies it to every \(role.displayName.lowercased()) box on this page")
                     Button("Reset to \(role.displayName) Preset") { model.updateSelected("Reset Style") { $0.style = nil } }
                         .disabled(blocks.allSatisfy { $0.style == nil })
                     Button(blocks.count > 1 ? "Delete \(blocks.count) Text Boxes" : "Delete Text Box", role: .destructive) { model.deleteSelected() }
@@ -391,7 +395,7 @@ struct Inspector: View {
                     choosingFont = false
                 }
             }
-            Button("Add…") { importingFont = true }.help("Use a TTF/OTF font file; it is copied into the project's .mangatl folder")
+            Button("Add…") { importingFont = true }.tip("Use a TTF/OTF font file; it is copied into the project's .mangatl folder")
         }
     }
 

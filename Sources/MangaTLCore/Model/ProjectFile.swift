@@ -19,6 +19,10 @@ public struct ProjectFile: Codable, Equatable, Sendable {
         public var page = 0
         /// "grid", "reader" or "editor".
         public var mode = "grid"
+        /// Reader page width in points, or nil when fitted.
+        public var zoom: Double?
+        /// "width" or "height" when the reader is fitted to the window.
+        public var fit: String?
         public init() {}
     }
 

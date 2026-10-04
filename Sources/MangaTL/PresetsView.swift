@@ -86,7 +86,7 @@ struct PresetsView: View {
         }
         Section("Size") {
             LabeledContent("Auto-fit scale") { percent(field(\.sizeFactor), 0.6...1.2) }
-                .help("How large text is relative to the largest size that fits (e.g. 85% for whispers)")
+                .tip("How large text is relative to the largest size that fits (e.g. 85% for whispers)")
             LabeledContent("Width") { percent(field(\.horizontalScale), 0.7...1.3) }
             LabeledContent("Height") { percent(field(\.verticalScale), 0.8...1.6) }
             LabeledContent("Line height") { percent(field(\.lineHeight), 0.7...1.8) }

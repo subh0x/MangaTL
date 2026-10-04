@@ -10,6 +10,8 @@ import UniformTypeIdentifiers
 /// pages reuses every existing thumbnail.
 public final class ThumbnailCache: @unchecked Sendable {
     public static let maxPixelSize = 320
+    /// Sharper thumbnails for large grid sizes (decoded on demand, cached separately).
+    public static let largePixelSize = 640
     public static let memoryLimit = 40 << 20
     public static let diskLimit: Int64 = 1_500 << 20
 
@@ -34,8 +36,12 @@ public final class ThumbnailCache: @unchecked Sendable {
         SHA256.hash(data: Data(key.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
+    private func memoryKey(_ index: Int, large: Bool) -> NSString {
+        (large ? "\(source.pageKey(at: index))@2x" : source.pageKey(at: index)) as NSString
+    }
+
     /// Memory-only lookup; cheap enough for the main thread.
-    public func cached(_ index: Int) -> CGImage? { memory.object(forKey: source.pageKey(at: index) as NSString) }
+    public func cached(_ index: Int, large: Bool = false) -> CGImage? { memory.object(forKey: memoryKey(index, large: large)) }
 
     /// Width / height of the page, known once its thumbnail has been loaded.
     public func aspect(_ index: Int) -> CGFloat? {
@@ -44,19 +50,20 @@ public final class ThumbnailCache: @unchecked Sendable {
     }
 
     /// Memory → disk → original page. Call off the main thread.
-    public func load(_ index: Int) throws -> CGImage {
-        if let image = cached(index) { return image }
+    public func load(_ index: Int, large: Bool = false) throws -> CGImage {
+        if let image = cached(index, large: large) { return image }
         let pageKey = source.pageKey(at: index)
-        let file = directory.appendingPathComponent("\(Self.hash(source.cacheKey(at: index))).heic")
+        let pixels = large ? Self.largePixelSize : Self.maxPixelSize
+        let file = directory.appendingPathComponent("\(Self.hash(source.cacheKey(at: index) + (large ? "@640" : ""))).heic")
         let image: CGImage
-        if let disk = try? PageDecoder.decode(url: file, maxPixelSize: Self.maxPixelSize) {
+        if let disk = try? PageDecoder.decode(url: file, maxPixelSize: pixels) {
             image = disk
             try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
         } else {
-            image = try source.image(at: index, maxPixelSize: Self.maxPixelSize)
+            image = try source.image(at: index, maxPixelSize: pixels)
             Self.writeHEIC(image, to: file)
         }
-        memory.setObject(image, forKey: pageKey as NSString, cost: image.bytesPerRow * image.height)
+        memory.setObject(image, forKey: memoryKey(index, large: large), cost: image.bytesPerRow * image.height)
         aspectLock.withLock { aspects[pageKey] = CGFloat(image.width) / CGFloat(max(1, image.height)) }
         return image
     }
