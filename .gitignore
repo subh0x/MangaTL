@@ -1,0 +1,25 @@
+# Build output
+.build/
+.swiftpm/
+*.app
+
+# Python env for fetching models (recreate with tools/export_models.py setup)
+tools/.venv/
+
+# Downloaded / generated models (tools/export_models.py)
+models/
+
+# Sample pages and spike artefacts (tools/fetch_samples.sh recreates the samples)
+spike/pages/
+spike/smoke/
+spike/book2500/
+spike/book600.cbz
+spike/out/
+spike/ref1152/
+spike/*.jpg
+spike/*.png
+
+# Per-project app data inside any test folder
+.mangatl/
+
+.DS_Store
