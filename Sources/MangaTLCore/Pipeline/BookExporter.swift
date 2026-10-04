@@ -12,7 +12,7 @@ public enum BookExporter {
     public static let maxPixels = 4096
 
     /// With `store` nil the pages are written as they are (used to import a CBZ/PDF into a folder).
-    public static func export(_ source: any PageSource, store: ProjectStore?, style: TextStyle, to url: URL, format: Format,
+    public static func export(_ source: any PageSource, store: ProjectStore?, settings: ProjectSettings, to url: URL, format: Format,
                               progress: @Sendable (Int, Int) -> Void = { _, _ in }) async throws {
         let digits = String(source.count).count
         var archive: Archive?
@@ -30,7 +30,7 @@ public enum BookExporter {
                 var image = try source.image(at: index, maxPixelSize: maxPixels)
                 let page = source.pageKey(at: index)
                 if let store, let doc = store.loadPage(page),
-                   let rendered = PageRenderer.render(page: image, doc: doc, layers: store.visibleLayers(of: doc, page: page), style: style) {
+                   let rendered = PageRenderer.render(page: image, doc: doc, layers: store.visibleLayers(of: doc, page: page), settings: settings) {
                     image = rendered
                 }
                 return try jpeg(image)

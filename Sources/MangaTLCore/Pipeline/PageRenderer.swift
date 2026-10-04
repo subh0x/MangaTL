@@ -15,7 +15,7 @@ public enum PageRenderer {
         }
     }
 
-    public static func render(page: CGImage, doc: PageDoc, layers: [Layer], style: TextStyle, showText: Bool = true) -> CGImage? {
+    public static func render(page: CGImage, doc: PageDoc, layers: [Layer], settings: ProjectSettings, showText: Bool = true) -> CGImage? {
         let size = CGSize(width: page.width, height: page.height)
         guard let ctx = CGContext(data: nil, width: page.width, height: page.height, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -28,7 +28,7 @@ public enum PageRenderer {
         drawLayers(layers, in: ctx, pageHeight: size.height, scale: scale)
         if showText {
             for block in doc.blocks where !block.hidden {
-                drawText(block, style: block.style ?? style, in: ctx, pageSize: size, scale: scale)
+                drawText(block, style: settings.resolvedStyle(for: block), in: ctx, pageSize: size, scale: scale)
             }
         }
         return ctx.makeImage()
@@ -44,25 +44,29 @@ public enum PageRenderer {
 
     /// The font size `drawText` uses for `block` (auto-fitted unless the style fixes it).
     public static func fittedFontSize(_ block: TextBlock, style: TextStyle, pageSize: CGSize, scale: CGFloat) -> CGFloat? {
-        layout(block, style: style, pageSize: pageSize, scale: scale)?.layout.fontSize
+        textLayout(block, style: style, pageSize: pageSize, scale: scale)?.fontSize
     }
 
-    private static func layout(_ block: TextBlock, style: TextStyle, pageSize: CGSize, scale: CGFloat) -> (layout: Typesetter.Layout, frame: CGRect)? {
+    /// The block's frame in a bottom-left-origin page space (normalised rects are top-left).
+    static func flippedFrame(_ block: TextBlock, pageSize: CGSize) -> CGRect {
         let rect = block.layoutRect.denormalized(to: pageSize)
-        // Normalised rects are top-left-origin; Core Text draws bottom-left.
-        let flipped = CGRect(x: rect.minX, y: pageSize.height - rect.maxY, width: rect.width, height: rect.height)
-        let box = Typesetter.textBox(for: flipped, shape: block.shape)
-        return Typesetter.layout(block.translation, in: box, style: style, scale: scale).map { ($0, flipped) }
+        return CGRect(x: rect.minX, y: pageSize.height - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    /// How `drawText` lays the block out (also used by the typeset check).
+    public static func textLayout(_ block: TextBlock, style: TextStyle, pageSize: CGSize, scale: CGFloat) -> Typesetter.Layout? {
+        Typesetter.layout(block.translation, in: flippedFrame(block, pageSize: pageSize), shape: block.shape, style: style, scale: scale)
     }
 
     /// Draws one block into a bottom-left-origin context the size of the page.
     public static func drawText(_ block: TextBlock, style: TextStyle, in ctx: CGContext, pageSize: CGSize, scale: CGFloat) {
-        guard let (layout, flipped) = layout(block, style: style, pageSize: pageSize, scale: scale) else { return }
+        guard let layout = textLayout(block, style: style, pageSize: pageSize, scale: scale) else { return }
+        let frame = flippedFrame(block, pageSize: pageSize)
         ctx.saveGState()
         if block.rotation != 0 {
-            ctx.translateBy(x: flipped.midX, y: flipped.midY)
+            ctx.translateBy(x: frame.midX, y: frame.midY)
             ctx.rotate(by: -block.rotation * .pi / 180)
-            ctx.translateBy(x: -flipped.midX, y: -flipped.midY)
+            ctx.translateBy(x: -frame.midX, y: -frame.midY)
         }
         Typesetter.draw(layout, style: style, in: ctx, scale: scale)
         ctx.restoreGState()

@@ -184,7 +184,40 @@ final class EditorModel {
     var selectedBlock: TextBlock? { selection.count == 1 ? doc.blocks.first { selection.contains($0.id) } : nil }
     var selectedBlocks: [TextBlock] { doc.blocks.filter { selection.contains($0.id) } }
 
-    func style(of block: TextBlock) -> TextStyle { block.style ?? project.settings.style }
+    func style(of block: TextBlock) -> TextStyle { project.settings.resolvedStyle(for: block) }
+
+    /// Typesetting warnings for the page (layouts are cached, so this is cheap to recompute).
+    var typesetIssues: [TypesetCheck.Issue] { TypesetCheck.check(doc, settings: project.settings) }
+
+    /// 1-based reading-order number of a block, as shown in the layers list.
+    func blockNumber(_ id: TextBlock.ID) -> Int { (doc.blocks.firstIndex { $0.id == id } ?? 0) + 1 }
+
+    func apply(_ fix: TypesetCheck.Fix, to id: TextBlock.ID) {
+        let settings = project.settings
+        change(fix.title) { doc in
+            guard let i = doc.blocks.firstIndex(where: { $0.id == id }) else { return }
+            var style = settings.resolvedStyle(for: doc.blocks[i])
+            fix.apply(to: &style)
+            doc.blocks[i].style = style
+        }
+    }
+
+    /// Makes `block`'s style its role's preset for the project, and lets every box of that role on
+    /// this page follow it.
+    func useAsPreset(_ block: TextBlock) {
+        let role = block.role ?? .dialogue
+        let style = style(of: block)
+        if role == .dialogue {
+            project.settings.style = style
+        } else {
+            var presets = project.settings.roleStyles ?? [:]
+            presets[role] = style
+            project.settings.roleStyles = presets
+        }
+        change("Use as Preset") { doc in
+            for i in doc.blocks.indices where (doc.blocks[i].role ?? .dialogue) == role { doc.blocks[i].style = nil }
+        }
+    }
 
     /// The size auto-fit picks for `block` (page pixels), for showing next to the size field.
     func fittedFontSize(of block: TextBlock) -> Double? {

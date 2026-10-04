@@ -129,7 +129,7 @@ struct Fixture {
         try store.save(PageDoc(workingSize: CGSize(width: 1000, height: 1500), layers: [shown, hidden]), page: page2)
 
         let out = fixture.root.appendingPathComponent(format == .cbz ? "out.cbz" : "out")
-        try await BookExporter.export(source, store: store, style: TextStyle(), to: out, format: format)
+        try await BookExporter.export(source, store: store, settings: ProjectSettings(), to: out, format: format)
         let exported = try PageSources.open(out)
         #expect(exported.count == 3)
         #expect((0..<3).map(exported.name(at:)) == ["1.jpg", "2.jpg", "3.jpg"])

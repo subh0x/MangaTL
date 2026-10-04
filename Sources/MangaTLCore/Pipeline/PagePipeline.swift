@@ -39,9 +39,12 @@ public actor PagePipeline {
         let blocks = zip(kept, translations).map { pair, translation in
             let (region, text) = pair
             let layout = region.bubble ?? region.text
-            return TextBlock(textRect: region.text.normalized(in: size), layoutRect: layout.normalized(in: size),
-                             shape: region.bubble.map { Self.shape(of: $0, in: page) } ?? .rectangle,
-                             sourceText: text, translation: translation)
+            var block = TextBlock(textRect: region.text.normalized(in: size), layoutRect: layout.normalized(in: size),
+                                  shape: region.bubble.map { Self.shape(of: $0, in: page) } ?? .rectangle,
+                                  sourceText: text, translation: translation)
+            let role = Self.guessRole(source: text, translation: translation, inBubble: region.bubble != nil)
+            block.role = role == .dialogue ? nil : role
+            return block
         }
         // Translating again replaces the text and the clean-up layer; the user's own layers stay.
         let key = source.pageKey(at: index)
@@ -74,6 +77,21 @@ public actor PagePipeline {
     /// Returns a rect-sized buffer: healed pixels opaque, everything else transparent.
     public func heal(_ page: PixelBuffer, rect: CGRect, mask: [Bool]) throws -> PixelBuffer {
         try Inpainter.heal(page, rect: rect, mask: mask)
+    }
+
+    /// A first guess at what kind of lettering a block is; the user can change it in the editor.
+    static func guessRole(source: String, translation: String, inBubble: Bool) -> TextRole {
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let exclamations = trimmed.filter { $0 == "!" || $0 == "！" }.count
+        if !inBubble {
+            // Short text loose on the art is a sound effect; longer text is narration/captions.
+            let letters = trimmed.filter { $0.isLetter }.count
+            return letters <= 4 && translation.split(whereSeparator: \.isWhitespace).count <= 2 ? .sfx : .narration
+        }
+        if let first = trimmed.first, "(（".contains(first) { return .thought }
+        let latin = translation.filter { $0.isLetter }
+        if exclamations >= 2 || (latin.count >= 4 && latin == latin.uppercased() && exclamations >= 1) { return .shout }
+        return .dialogue
     }
 
     /// A balloon whose box corners are the same colour as its centre is rectangular (captions);

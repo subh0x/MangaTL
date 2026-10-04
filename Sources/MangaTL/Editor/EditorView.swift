@@ -207,7 +207,7 @@ private struct LayersPanel: View {
 }
 
 /// Text and style controls for the selected text boxes (one or several).
-private struct Inspector: View {
+struct Inspector: View {
     @Bindable var model: EditorModel
     @State private var importingFont = false
     @State private var choosingFont = false
@@ -234,8 +234,25 @@ private struct Inspector: View {
                         Button("Translate Again") { model.retranslateSelected() }
                     }
                 }
+                Section("Role") {
+                    Picker("Role", selection: Binding(
+                        get: { current(first).role ?? .dialogue },
+                        set: { role in model.updateSelected("Role") { $0.role = role == .dialogue ? nil : role } })) {
+                        ForEach(TextRole.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    .help("Each role has its own style preset (Translate › Typesetting Presets…)")
+                }
                 Section("Font") {
                     fontPicker(first)
+                    HStack {
+                        Toggle(isOn: styleBinding(\.bold, "Bold", first)) { Image(systemName: "bold") }
+                            .toggleStyle(.button)
+                            .help("Bold face (if the font has one)")
+                        Toggle(isOn: styleBinding(\.italic, "Italic", first)) { Image(systemName: "italic") }
+                            .toggleStyle(.button)
+                            .help("Italic face, e.g. for thoughts")
+                        Spacer()
+                    }
                     sizeControl(blocks)
                     Picker("Alignment", selection: styleBinding(\.alignment, "Alignment", first)) {
                         Image(systemName: "text.alignleft").tag(MangaTLCore.TextAlignment.left)
@@ -247,6 +264,18 @@ private struct Inspector: View {
                         Slider(value: styleBinding(\.lineHeight, "Line Height", first), in: 0.7...1.8)
                     }
                     Toggle("Uppercase", isOn: styleBinding(\.uppercase, "Uppercase", first))
+                    LabeledContent("Width") {
+                        percentSlider(styleBinding(\.horizontalScale, "Width", first), in: 0.7...1.3)
+                    }
+                    .help("Narrow wide lines (about 90%) without changing the size")
+                    LabeledContent("Height") {
+                        percentSlider(styleBinding(\.verticalScale, "Height", first), in: 0.8...1.6)
+                    }
+                    .help("Taller letters for shouting (120–150%)")
+                    LabeledContent("Space inside") {
+                        percentSlider(styleBinding(\.padding, "Space Inside", first), in: 0...0.3)
+                    }
+                    .help("Empty space kept between the text and the balloon edge")
                 }
                 Section("Colour") {
                     LabeledContent("Text") { ColorField(color: styleBinding(\.color, "Text Colour", first)) }
@@ -268,16 +297,16 @@ private struct Inspector: View {
                     }
                 }
                 Section {
-                    Button("Use This Style for the Whole Book") {
-                        model.project.settings.style = model.style(of: current(first))
-                        model.change("Use Book Style") { doc in for i in doc.blocks.indices { doc.blocks[i].style = nil } }
-                    }
-                    Button("Reset to Book Style") { model.updateSelected("Reset Style") { $0.style = nil } }
+                    let role = current(first).role ?? .dialogue
+                    Button("Use This Style for All \(role.displayName) Text") { model.useAsPreset(current(first)) }
+                        .help("Saves it as the project's \(role.displayName) preset and applies it to every \(role.displayName.lowercased()) box on this page")
+                    Button("Reset to \(role.displayName) Preset") { model.updateSelected("Reset Style") { $0.style = nil } }
                         .disabled(blocks.allSatisfy { $0.style == nil })
                     Button(blocks.count > 1 ? "Delete \(blocks.count) Text Boxes" : "Delete Text Box", role: .destructive) { model.deleteSelected() }
                 }
             }
             .formStyle(.grouped)
+            .safeAreaInset(edge: .bottom, spacing: 0) { TypesetCheckBar(model: model) }
             .fileImporter(isPresented: $importingFont, allowedContentTypes: [.font]) { result in
                 guard case .success(let url) = result else { return }
                 let scoped = url.startAccessingSecurityScopedResource()
@@ -299,6 +328,15 @@ private struct Inspector: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
+            .safeAreaInset(edge: .bottom, spacing: 0) { TypesetCheckBar(model: model) }
+        }
+    }
+
+    private func percentSlider(_ value: Binding<Double>, in range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 6) {
+            Slider(value: value, in: range)
+            Text("\(Int((value.wrappedValue * 100).rounded()))%").monospacedDigit().foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .trailing)
         }
     }
 
@@ -372,9 +410,9 @@ private struct Inspector: View {
 
     /// Applies a style change to every selected box (each keeps its other settings).
     private func setStyle(_ name: String, _ body: (inout TextStyle) -> Void) {
-        let base = project.settings.style
+        let settings = project.settings
         model.updateSelected(name) { block in
-            var style = block.style ?? base
+            var style = settings.resolvedStyle(for: block)
             body(&style)
             block.style = style
         }
@@ -393,7 +431,7 @@ private struct Inspector: View {
 
 /// Searchable list of installed font families. Built only while the popover is open: a menu with
 /// every family cost ~60 MB for as long as the inspector was visible.
-private struct FontFamilyList: View {
+struct FontFamilyList: View {
     /// nil = the default (CC Wild Words).
     var onPick: (String?) -> Void
     @State private var query = ""
@@ -414,5 +452,57 @@ private struct FontFamilyList: View {
         }
         .frame(width: 260, height: 360)
         .onAppear { families = NSFontManager.shared.availableFontFamilies }
+    }
+}
+
+/// Typesetting warnings for this page, with one-click fixes; clicking one selects its box.
+private struct TypesetCheckBar: View {
+    @Bindable var model: EditorModel
+    @State private var expanded = true
+
+    var body: some View {
+        let issues = model.typesetIssues
+        if !issues.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Button { expanded.toggle() } label: {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                        Text("Typeset Check · \(issues.count)").font(.headline)
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.down" : "chevron.up").foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if expanded {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(issues) { issue in
+                                HStack(spacing: 8) {
+                                    Button {
+                                        model.tool = .select
+                                        model.selection = [issue.block]
+                                    } label: {
+                                        Text("\(model.blockNumber(issue.block)). \(issue.kind.title)")
+                                            .lineLimit(2)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.plain)
+                                    if let fix = issue.fix {
+                                        Button(fix.title) { model.apply(fix, to: issue.block) }
+                                            .controlSize(.small)
+                                    }
+                                }
+                                .font(.callout)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 140)
+                }
+            }
+            .padding(12)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+        }
     }
 }

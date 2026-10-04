@@ -41,6 +41,7 @@ struct ContentView: View {
     @State private var choosingFolder = false
     @State private var error: String?
     @State private var busy: String?
+    @State private var sheet: ProjectSheet?
     @AppStorage("editorInspectorVisible") private var inspectorVisible = true
     private let recents = RecentProjects.shared
 
@@ -61,6 +62,19 @@ struct ContentView: View {
                 Button("OK") { error = nil; project?.dismissError() }
             } message: { Text($0) }
             .onChange(of: project?.lastTranslated?.token) { reloadEditorIfTranslated() }
+            .sheet(item: $sheet) { which in
+                if let project {
+                    switch which {
+                    case .presets: PresetsView(project: project)
+                    case .typesetCheck:
+                        TypesetCheckView(project: project) { page, block in
+                            edit(page)
+                            editor?.tool = .select
+                            editor?.selection = [block]
+                        }
+                    }
+                }
+            }
             .onChange(of: mode) { rememberState() }
             .onChange(of: editor?.index) { rememberState() }
             #if DEBUG || BENCH
@@ -114,7 +128,7 @@ struct ContentView: View {
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 LanguageMenu(project: project)
-                TranslateMenu(project: project, position: position, editor: editor)
+                TranslateMenu(project: project, position: position, editor: editor) { sheet = $0 }
             }
         } else if let project {
             ToolbarItem(placement: .navigation) {
@@ -127,7 +141,7 @@ struct ContentView: View {
             ToolbarItem { LanguageMenu(project: project) }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
-                TranslateMenu(project: project, position: position)
+                TranslateMenu(project: project, position: position) { sheet = $0 }
                 Button { edit(position.page) } label: { Label("Edit Page", systemImage: "pencil.and.scribble") }
                     .keyboardShortcut("e")
                     .help("Edit text, erase and retouch this page (⌘E, or double-click a page in the reader)")
@@ -204,7 +218,7 @@ struct ContentView: View {
         Task {
             do {
                 let source = try PageSources.open(archive)
-                try await BookExporter.export(source, store: nil, style: TextStyle(), to: folder, format: .folder)
+                try await BookExporter.export(source, store: nil, settings: ProjectSettings(), to: folder, format: .folder)
                 busy = nil
                 open(folder)
             } catch {
@@ -268,5 +282,6 @@ struct ContentView: View {
     var currentEditor: EditorModel? { editor }
     var currentProject: ProjectSession? { project }
     func showReader() { mode = .reader }
+    func show(_ which: ProjectSheet?) { sheet = which }
     #endif
 }

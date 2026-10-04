@@ -93,8 +93,9 @@ enum SmokeRun {
     static var bookPath: String? { ProcessInfo.processInfo.environment["MANGATL_SMOKE"] }
 
     /// Renders the whole window (title bar + toolbar included) into a PNG.
-    static func snapshotWindow(to url: URL) {
-        guard let frameView = NSApp.windows.first(where: { $0.isVisible })?.contentView?.superview else { return }
+    static func snapshotWindow(to url: URL, sheet: Bool = false) {
+        let main = NSApp.windows.first(where: { $0.isVisible && $0.sheetParent == nil })
+        guard let window = sheet ? main?.attachedSheet : main, let frameView = window.contentView?.superview else { return }
         let rect = frameView.bounds
         guard let rep = frameView.bitmapImageRepForCachingDisplay(in: rect) else { return }
         frameView.cacheDisplay(in: rect, to: rep)
@@ -153,6 +154,14 @@ enum SmokeRun {
         await waitForTranslation(project, peak: &peak)
         log("translated \(project.translatedCount) pages, peak \(Int(peak)) MB, error \(project.lastError ?? "none")")
         await snapshot(width: 1000, name: "reader")
+
+        for which in [ProjectSheet.presets, .typesetCheck] {
+            view.show(which)
+            try? await Task.sleep(for: .seconds(1.5))
+            snapshotWindow(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_sheet_\(which.rawValue).png"), sheet: true)
+            view.show(nil)
+            try? await Task.sleep(for: .milliseconds(500))
+        }
 
         view.edit(0)
         try? await Task.sleep(for: .milliseconds(500))

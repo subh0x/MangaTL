@@ -5,6 +5,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Typesetting from scanlation practice** (AnonBlack's Typesetting Guide and related guides):
+  - **Diamond line breaking:** balloon text is broken into lines that follow the balloon's curve, short at the top and bottom and widest in the middle, chosen by a dynamic program instead of plain word-wrap. Captions get evenly balanced lines.
+  - **Hyphenation** only as a last resort: words of 6+ letters, split once near the middle at a dictionary hyphenation point.
+  - **Balloon roles:** dialogue, thought, shout, whisper, narration, sound effect. Guessed during translation and changeable in the inspector.
+  - **Typesetting Presets** (Translate › Typesetting Presets…): a style per role with a live preview. Defaults: italic thoughts, bold-italic shouts at 130% height, whispers at 85%, and an outline on narration and sound effects.
+  - **New style options:** bold and italic faces, width and height scale, space inside the balloon, auto-fit scale.
+  - **Typeset Check:** warns about text that doesn't fit, size outliers on a page, a lone short word on the last line, mixed fixed sizes within a role, and text touching the edge. One-click fixes are offered where possible. It appears in the editor's inspector and project-wide (⇧⌘K).
+
+### Changed
+- The outline is drawn outside the glyphs. New projects letter dialogue without an outline by default.
+
 ## [0.1.0] - 2026-10-04
 
 First version: a native macOS app that translates manga pages on-device.

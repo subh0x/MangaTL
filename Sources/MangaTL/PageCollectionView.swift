@@ -162,13 +162,13 @@ struct PageCollectionView: NSViewRepresentable {
                 }
             case .reader:
                 let pixels = readerPixelSize(collectionView)
-                let (source, store, style) = (project.source, project.store, project.settings.style)
+                let (source, store, settings) = (project.source, project.store, project.settings)
                 let composite = translated && !showOriginal
                 let key = project.pageKey(index)
                 load(into: item, index: index) {
                     var image = try source.image(at: index, maxPixelSize: pixels)
                     if composite, let doc = store.loadPage(key),
-                       let rendered = PageRenderer.render(page: image, doc: doc, layers: store.visibleLayers(of: doc, page: key), style: style) {
+                       let rendered = PageRenderer.render(page: image, doc: doc, layers: store.visibleLayers(of: doc, page: key), settings: settings) {
                         image = rendered
                     }
                     return (DisplaySurface.make(from: image) as Any?) ?? image

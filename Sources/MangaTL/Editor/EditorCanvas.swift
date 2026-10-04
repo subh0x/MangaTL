@@ -46,7 +46,7 @@ struct EditorCanvas: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         // Reading these registers observation, so any change redraws the canvas.
-        _ = (model.doc, model.selection, model.tool, model.pixelsVersion, model.brushSize, model.cloneSource, model.activeLayer)
+        _ = (model.doc, model.selection, model.tool, model.pixelsVersion, model.brushSize, model.cloneSource, model.activeLayer, model.project.settings)
         scroll.documentView?.needsDisplay = true
         if let command = model.zoomCommand {
             context.coordinator.fitted = command == .fit

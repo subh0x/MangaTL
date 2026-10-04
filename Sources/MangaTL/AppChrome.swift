@@ -28,11 +28,18 @@ struct LanguageMenu: View {
     }
 }
 
+/// Project-level sheets opened from the Translate menu.
+enum ProjectSheet: String, Identifiable {
+    case presets, typesetCheck
+    var id: String { rawValue }
+}
+
 struct TranslateMenu: View {
     let project: ProjectSession
     let position: ReadingPosition
     /// Set while editing: translating saves the page first, and selected boxes can be re-done.
     var editor: EditorModel?
+    var onShow: (ProjectSheet) -> Void = { _ in }
 
     var body: some View {
         Menu {
@@ -47,6 +54,10 @@ struct TranslateMenu: View {
                 Button("Read Selected Text Again") { editor.rereadSelected() }
                     .disabled(editor.selectedBlock == nil)
             }
+            Divider()
+            Button("Typesetting Presets…") { onShow(.presets) }
+            Button("Typeset Check…") { onShow(.typesetCheck) }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
             Divider()
             Button("Revert This Page to Original") { project.revert(page: editor?.index ?? position.page) }
                 .disabled(editor != nil)

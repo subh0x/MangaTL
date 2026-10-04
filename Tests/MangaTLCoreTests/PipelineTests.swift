@@ -59,7 +59,7 @@ struct PipelineTests {
 
         // Render for visual review.
         let page = try source.image(at: 0, maxPixelSize: PagePipeline.workingMaxPixels)
-        let rendered = try #require(PageRenderer.render(page: page, doc: doc, layers: store.visibleLayers(of: doc, page: key), style: settings.style))
+        let rendered = try #require(PageRenderer.render(page: page, doc: doc, layers: store.visibleLayers(of: doc, page: key), settings: settings))
         try FileManager.default.createDirectory(at: Self.out, withIntermediateDirectories: true)
         let dest = try #require(CGImageDestinationCreateWithURL(Self.out.appendingPathComponent("\(name).jpg") as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
         CGImageDestinationAddImage(dest, rendered, nil)

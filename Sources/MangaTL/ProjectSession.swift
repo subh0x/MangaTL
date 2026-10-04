@@ -79,10 +79,10 @@ final class ProjectSession {
     func export(to url: URL, format: BookExporter.Format) {
         cancel()
         lastError = nil
-        let (source, store, style) = (source, store, settings.style)
+        let (source, store, settings) = (source, store, settings)
         worker = Task {
             do {
-                try await BookExporter.export(source, store: store, style: style, to: url, format: format) { done, total in
+                try await BookExporter.export(source, store: store, settings: settings, to: url, format: format) { done, total in
                     Task { @MainActor in if self.worker != nil { self.progress = (done, total, min(done, total - 1), "Exporting") } }
                 }
             } catch is CancellationError {
@@ -107,6 +107,9 @@ final class ProjectSession {
     }
 
     func pageChanged(_ index: Int) { onPageChanged(index) }
+
+    /// Presets changed: every page's lettering may look different.
+    func stylesChanged() { onPagesReordered() }
 
     func dismissError() { lastError = nil }
 

@@ -28,12 +28,69 @@ public enum SourceLanguage: String, Codable, CaseIterable, Sendable, Identifiabl
 public struct ProjectSettings: Codable, Equatable, Sendable {
     public var language: SourceLanguage
     public var rightToLeft: Bool
+    /// The project's base lettering style (dialogue).
     public var style: TextStyle
+    /// Per-role overrides of `TextRole.preset`; nil/missing roles use the preset.
+    public var roleStyles: [TextRole: TextStyle]?
 
     public init(language: SourceLanguage = .japanese) {
         self.language = language
         rightToLeft = language.defaultRightToLeft
         style = TextStyle()
+    }
+
+    /// The style a role uses unless a block overrides it.
+    public func style(for role: TextRole) -> TextStyle {
+        roleStyles?[role] ?? role.preset(from: style)
+    }
+
+    /// Block style → role preset → project style.
+    public func resolvedStyle(for block: TextBlock) -> TextStyle {
+        block.style ?? style(for: block.role ?? .dialogue)
+    }
+}
+
+/// What kind of lettering a block is; each role has its own style preset.
+public enum TextRole: String, Codable, CaseIterable, Identifiable, Sendable, CodingKeyRepresentable {
+    case dialogue, thought, shout, whisper, narration, sfx
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .dialogue: "Dialogue"
+        case .thought: "Thought"
+        case .shout: "Shout"
+        case .whisper: "Whisper"
+        case .narration: "Narration"
+        case .sfx: "Sound Effect"
+        }
+    }
+
+    /// Defaults from common scanlation typesetting practice: italic thoughts, bold-italic shouts
+    /// set taller, smaller whispers, and an outline only on lettering that sits over artwork.
+    public func preset(from base: TextStyle) -> TextStyle {
+        var style = base
+        switch self {
+        case .dialogue:
+            break
+        case .thought:
+            style.italic = true
+        case .shout:
+            style.bold = true
+            style.italic = true
+            style.verticalScale = 1.3
+        case .whisper:
+            style.sizeFactor = 0.85
+        case .narration:
+            style.padding = 0.06
+            style.strokeWidth = max(style.strokeWidth, 3)
+        case .sfx:
+            style.bold = true
+            style.italic = true
+            style.strokeWidth = max(style.strokeWidth, 3)
+        }
+        return style
     }
 }
 
@@ -61,9 +118,9 @@ extension RGBA {
     }
 }
 
-public enum TextAlignment: String, Codable, CaseIterable, Sendable { case left, center, right }
+public enum TextAlignment: String, Codable, CaseIterable, Hashable, Sendable { case left, center, right }
 
-public struct TextStyle: Codable, Equatable, Sendable {
+public struct TextStyle: Codable, Equatable, Hashable, Sendable {
     /// CC Wild Words (Comicraft), the usual manga lettering face; Core Text falls back to the
     /// system font if it isn't installed.
     public static let defaultFontName = "CCWildWordsRoman"
@@ -72,16 +129,47 @@ public struct TextStyle: Codable, Equatable, Sendable {
 
     /// PostScript name of an installed or project-registered font.
     public var fontName: String = TextStyle.defaultFontName
+    /// Use the family's bold / italic face (when it has one).
+    public var bold = false
+    public var italic = false
     /// Fixed size in page pixels; nil = fit the shape automatically.
     public var fontSize: Double?
+    /// Multiplies the auto-fitted size (e.g. 0.85 for whispers).
+    public var sizeFactor: Double = 1
     public var color: RGBA = .black
     public var strokeColor: RGBA = .white
-    /// Outline width in page pixels (0 = none).
-    public var strokeWidth: Double = 3
+    /// Outline width in page pixels, drawn outside the glyphs (0 = none).
+    public var strokeWidth: Double = 0
     public var alignment: TextAlignment = .center
     public var lineHeight: Double = 1.05
     public var uppercase = false
+    /// Glyph scale: 0.9 narrows a wide line, 1.3 makes a shout taller.
+    public var horizontalScale: Double = 1
+    public var verticalScale: Double = 1
+    /// Empty space kept inside the balloon, as a fraction of its size on each side.
+    public var padding: Double = 0.12
+
     public init() {}
+
+    public init(from decoder: Decoder) throws {
+        // Every field is optional on disk so older project files keep loading.
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = TextStyle()
+        fontName = try c.decodeIfPresent(String.self, forKey: .fontName) ?? d.fontName
+        bold = try c.decodeIfPresent(Bool.self, forKey: .bold) ?? d.bold
+        italic = try c.decodeIfPresent(Bool.self, forKey: .italic) ?? d.italic
+        fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize)
+        sizeFactor = try c.decodeIfPresent(Double.self, forKey: .sizeFactor) ?? d.sizeFactor
+        color = try c.decodeIfPresent(RGBA.self, forKey: .color) ?? d.color
+        strokeColor = try c.decodeIfPresent(RGBA.self, forKey: .strokeColor) ?? d.strokeColor
+        strokeWidth = try c.decodeIfPresent(Double.self, forKey: .strokeWidth) ?? d.strokeWidth
+        alignment = try c.decodeIfPresent(TextAlignment.self, forKey: .alignment) ?? d.alignment
+        lineHeight = try c.decodeIfPresent(Double.self, forKey: .lineHeight) ?? d.lineHeight
+        uppercase = try c.decodeIfPresent(Bool.self, forKey: .uppercase) ?? d.uppercase
+        horizontalScale = try c.decodeIfPresent(Double.self, forKey: .horizontalScale) ?? d.horizontalScale
+        verticalScale = try c.decodeIfPresent(Double.self, forKey: .verticalScale) ?? d.verticalScale
+        padding = try c.decodeIfPresent(Double.self, forKey: .padding) ?? d.padding
+    }
 }
 
 public enum BlockShape: String, Codable, Sendable { case ellipse, rectangle }
@@ -97,8 +185,10 @@ public struct TextBlock: Codable, Equatable, Identifiable, Sendable {
     public var shape: BlockShape
     public var sourceText: String
     public var translation: String
-    /// Overrides the project style when set.
+    /// Overrides the project's style for this block's role when set.
     public var style: TextStyle?
+    /// Dialogue when nil.
+    public var role: TextRole?
     /// Degrees, clockwise.
     public var rotation: Double = 0
     public var hidden = false
