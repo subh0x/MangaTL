@@ -18,13 +18,18 @@ final class ProjectSession {
 
     /// Queue progress, nil when idle.
     private(set) var progress: (done: Int, total: Int, page: Int, stage: String)?
-    private(set) var lastError: String?
+    /// Failures and warnings shown in the Problems panel, oldest first.
+    private(set) var problems: [Problem] = []
+    /// Ids of pages with saved work (translated or edited); observed by the sidebar and grid.
+    private(set) var translatedIDs: Set<String> = []
     /// Set when translation finishes a page, so an open editor can reload it.
     private(set) var lastTranslated: (page: String, token: Int)?
     /// Views that re-render pages; held weakly (SwiftUI may create and discard several).
     @ObservationIgnored private var observers: [PageObserver] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var stateWrite: Task<Void, Never>?
+    @ObservationIgnored private var folderWatch: DispatchSourceFileSystemObject?
+    @ObservationIgnored private var rescan: Task<Void, Never>?
 
     init(folder: URL) throws {
         source = try ProjectSource(folder: folder)
@@ -33,42 +38,57 @@ final class ProjectSession {
         settings = source.settings
         if settings.style.fontName == TextStyle.previousDefaultFontName { settings.style.fontName = TextStyle.defaultFontName }
         source.store.registerFonts()
+        translatedIDs = Set(pages.lazy.map(\.id).filter(source.store.hasPage))
+        watchFolder()
     }
 
     var title: String { source.title }
     var count: Int { pages.count }
     var isTranslating: Bool { worker != nil }
     func pageKey(_ index: Int) -> String { pages[index].id }
-    func isTranslated(_ index: Int) -> Bool { index < pages.count && store.hasPage(pages[index].id) }
-    var translatedCount: Int { pages.filter { store.hasPage($0.id) }.count }
+    func isTranslated(_ index: Int) -> Bool { index < pages.count && translatedIDs.contains(pages[index].id) }
+    var translatedCount: Int { translatedIDs.count }
 
     // MARK: Translation
 
     func translate(pages indices: [Int], redo: Bool = false) {
-        cancel()
         // Work by page id: the order may change while the queue runs.
-        let todo = indices.filter { $0 < pages.count && (redo || !isTranslated($0)) }.map { pages[$0].id }
+        translate(keys: indices.filter { $0 < pages.count && (redo || !isTranslated($0)) }.map { pages[$0].id })
+    }
+
+    private func translate(keys todo: [String]) {
+        cancel()
         guard !todo.isEmpty else { return }
-        lastError = nil
+        resolve(Self.translateStopped)
         let (source, store, settings) = (source, store, settings)
         worker = Task {
             for (n, key) in todo.enumerated() {
                 guard let index = pages.firstIndex(where: { $0.id == key }) else { continue }
                 progress = (n, todo.count, index, PagePipeline.Stage.detecting.rawValue)
                 do {
-                    _ = try await PagePipeline.shared.process(source, index: index, settings: settings, store: store) { stage in
+                    let doc = try await PagePipeline.shared.process(source, index: index, settings: settings, store: store) { stage in
                         Task { @MainActor in
                             if let p = self.progress, p.page == index { self.progress = (p.done, p.total, index, stage.rawValue) }
                         }
                     }
                     lastTranslated = (key, (lastTranslated?.token ?? 0) + 1)
                     pageChanged(index)
+                    resolve("Translate", page: key)
+                    if doc.blocks.isEmpty {
+                        report("Translate", page: key, "No text was found on this page. Use the Lasso tool in the editor to mark text the app missed.",
+                               severity: .warning) { [weak self] in self?.translate(keys: [key]) }
+                    }
                 } catch is CancellationError {
                     break
-                } catch {
-                    lastError = error.localizedDescription
+                } catch let error as PipelineError {
                     // Missing models / language packs fail every page alike: stop instead of repeating it.
-                    if error is PipelineError { break }
+                    let remaining = Array(todo[n...])
+                    report(Self.translateStopped, "Translation stopped: \(error.localizedDescription)") { [weak self] in
+                        self?.translate(keys: remaining)
+                    }
+                    break
+                } catch {
+                    report("Translate", page: key, error.localizedDescription) { [weak self] in self?.translate(keys: [key]) }
                 }
                 if Task.isCancelled { break }
             }
@@ -77,13 +97,15 @@ final class ProjectSession {
         }
     }
 
+    private static let translateStopped = "Translate Pages"
+
     /// Pages selected in the grid (for "Export Selected").
     var gridSelection: [Int] = []
 
     /// Exports `pages` (nil = all) and remembers `options` for next time.
     func export(pages: [Int]?, options: ExportOptions, to url: URL) {
         cancel()
-        lastError = nil
+        resolve("Export")
         source.exportOptions = options
         let (source, store, settings, title) = (source, store, settings, title)
         worker = Task {
@@ -95,7 +117,9 @@ final class ProjectSession {
                 if options.revealInFinder { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             } catch is CancellationError {
             } catch {
-                lastError = "Export failed: \(error.localizedDescription)"
+                report("Export", "Export to \(url.lastPathComponent) failed: \(error.localizedDescription)") { [weak self] in
+                    self?.export(pages: pages, options: options, to: url)
+                }
             }
             progress = nil
             worker = nil
@@ -114,7 +138,13 @@ final class ProjectSession {
         pageChanged(index)
     }
 
-    func pageChanged(_ index: Int) { liveObservers.forEach { $0.pageChanged(index) } }
+    func pageChanged(_ index: Int) {
+        if index < pages.count {
+            let id = pages[index].id
+            if store.hasPage(id) { translatedIDs.insert(id) } else { translatedIDs.remove(id) }
+        }
+        liveObservers.forEach { $0.pageChanged(index) }
+    }
 
     /// Presets changed: every page's lettering may look different.
     func stylesChanged() { liveObservers.forEach { $0.pagesChanged() } }
@@ -129,7 +159,32 @@ final class ProjectSession {
         return observers
     }
 
-    func dismissError() { lastError = nil }
+    // MARK: Problems
+
+    /// Records a failure (or warning) for the Problems panel. A newer problem for the same operation
+    /// and page replaces the older one; `retry` repeats the operation.
+    func report(_ operation: String, page: String? = nil, _ message: String, severity: Problem.Severity = .error,
+                retry: (@MainActor () -> Void)? = nil) {
+        problems.removeAll { $0.operation == operation && $0.pageID == page }
+        problems.append(Problem(severity: severity, operation: operation, pageID: page, message: message, retry: retry))
+    }
+
+    /// The operation succeeded: drops its problem.
+    func resolve(_ operation: String, page: String? = nil) {
+        problems.removeAll { $0.operation == operation && $0.pageID == page }
+    }
+
+    func retry(_ problem: Problem) {
+        dismiss(problem)
+        problem.retry?()
+    }
+
+    func dismiss(_ problem: Problem) { problems.removeAll { $0.id == problem.id } }
+
+    func clearProblems() { problems = [] }
+
+    /// Page number (0-based) of a problem's page, if it is still in the project.
+    func index(of pageID: String) -> Int? { pages.firstIndex { $0.id == pageID } }
 
     // MARK: Pages
 
@@ -138,8 +193,9 @@ final class ProjectSession {
         do {
             try source.insert(files: urls, at: index)
             pagesChanged()
+            resolve("Add Images")
         } catch {
-            lastError = "Couldn't add images: \(error.localizedDescription)"
+            report("Add Images", "Couldn't add images: \(error.localizedDescription)") { [weak self] in self?.addImages(urls, at: index) }
         }
     }
 
@@ -157,7 +213,42 @@ final class ProjectSession {
 
     private func pagesChanged() {
         pages = source.pages
+        translatedIDs = Set(pages.lazy.map(\.id).filter(store.hasPage))
         liveObservers.forEach { $0.pagesChanged() }
+    }
+
+    /// Picks up images added to (or removed from) the folder outside the app. A directory's own
+    /// write events fire when entries are added, removed or renamed; saves inside `.mangatl` and
+    /// in-place edits of an image don't, so our own writes don't trigger a rescan.
+    private func watchFolder() {
+        let fd = open(source.folder.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let watch = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
+        watch.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.scheduleRescan() }
+        }
+        watch.setCancelHandler { Darwin.close(fd) }
+        watch.resume()
+        folderWatch = watch
+    }
+
+    /// Batches bursts of events (a Finder copy of many files) into one rescan.
+    private func scheduleRescan() {
+        rescan?.cancel()
+        rescan = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            rescanFolder()
+        }
+    }
+
+    func rescanFolder() {
+        do {
+            if try source.rescan() { pagesChanged() }
+            resolve("Folder")
+        } catch {
+            report("Folder", "Couldn't read the project folder: \(error.localizedDescription)") { [weak self] in self?.rescanFolder() }
+        }
     }
 
     // MARK: State
@@ -174,9 +265,25 @@ final class ProjectSession {
 
     func close(state: ProjectFile.State) {
         cancel()
+        folderWatch?.cancel()
+        folderWatch = nil
+        rescan?.cancel()
         stateWrite?.cancel()
         source.state = state
     }
+}
+
+/// Something that failed or needs attention, shown in the Problems panel.
+struct Problem: Identifiable {
+    enum Severity { case error, warning }
+    let id = UUID()
+    let date = Date()
+    var severity: Severity
+    /// What was being done ("Translate", "Export", "Heal"…); with `pageID`, identifies the problem.
+    var operation: String
+    var pageID: String?
+    var message: String
+    var retry: (@MainActor () -> Void)?
 }
 
 /// A weakly held view that re-renders when pages change.

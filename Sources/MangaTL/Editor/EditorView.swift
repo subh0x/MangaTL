@@ -61,16 +61,17 @@ struct EditorToolbar: ToolbarContent {
                 .disabled(model.index + 1 >= pageCount)
                 .tip("Next page, saving this one", shortcut: "⌘]")
         }
-        ToolbarItem {
-            Picker("Tool", selection: $model.tool) {
-                ForEach(EditorModel.Tool.allCases) { tool in
-                    Label(tool.rawValue, systemImage: tool.symbol).tag(tool)
+        ToolbarItemGroup {
+            // One button per tool (not a segmented picker) so each gets its own tooltip.
+            ForEach(EditorModel.Tool.allCases) { tool in
+                Toggle(isOn: Binding(get: { model.tool == tool }, set: { if $0 { model.tool = tool } })) {
+                    Label(tool.rawValue, systemImage: tool.symbol)
                 }
+                .toggleStyle(.button)
+                .tip(tool.help, shortcut: tool.key.uppercased())
             }
-            .pickerStyle(.segmented)
-            .tip("Text (T) · Erase (E) · Heal (H) · Clone (C) · Unpaint (R)")
         }
-        if model.tool != .select {
+        if model.tool.isBrush {
             ToolbarItem {
                 HStack(spacing: 6) {
                     Image(systemName: "circle.dotted").foregroundStyle(.secondary)
@@ -80,7 +81,8 @@ struct EditorToolbar: ToolbarContent {
                         .lineLimit(1)
                         .frame(width: 52, alignment: .leading)
                 }
-                .tip("Brush size ([ and ])")
+                .padding(.horizontal, 8)
+                .tip("Brush size", shortcut: "[ ]")
             }
         }
         if model.tool == .erase {
@@ -316,7 +318,6 @@ struct Inspector: View {
                 }
             }
             .formStyle(.grouped)
-            .safeAreaInset(edge: .bottom, spacing: 0) { TypesetCheckBar(model: model) }
             .fileImporter(isPresented: $importingFont, allowedContentTypes: [.font]) { result in
                 guard case .success(let url) = result else { return }
                 let scoped = url.startAccessingSecurityScopedResource()
@@ -338,7 +339,6 @@ struct Inspector: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .safeAreaInset(edge: .bottom, spacing: 0) { TypesetCheckBar(model: model) }
         }
     }
 
@@ -462,57 +462,5 @@ struct FontFamilyList: View {
         }
         .frame(width: 260, height: 360)
         .onAppear { families = NSFontManager.shared.availableFontFamilies }
-    }
-}
-
-/// Typesetting warnings for this page, with one-click fixes; clicking one selects its box.
-private struct TypesetCheckBar: View {
-    @Bindable var model: EditorModel
-    @State private var expanded = true
-
-    var body: some View {
-        let issues = model.typesetIssues
-        if !issues.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Button { expanded.toggle() } label: {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-                        Text("Typeset Check · \(issues.count)").font(.headline)
-                        Spacer()
-                        Image(systemName: expanded ? "chevron.down" : "chevron.up").foregroundStyle(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if expanded {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(issues) { issue in
-                                HStack(spacing: 8) {
-                                    Button {
-                                        model.tool = .select
-                                        model.selection = [issue.block]
-                                    } label: {
-                                        Text("\(model.blockNumber(issue.block)). \(issue.kind.title)")
-                                            .lineLimit(2)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .buttonStyle(.plain)
-                                    if let fix = issue.fix {
-                                        Button(fix.title) { model.apply(fix, to: issue.block) }
-                                            .controlSize(.small)
-                                    }
-                                }
-                                .font(.callout)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 140)
-                }
-            }
-            .padding(12)
-            .background(.bar)
-            .overlay(alignment: .top) { Divider() }
-        }
     }
 }

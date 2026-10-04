@@ -87,13 +87,15 @@ final class CenteringClipView: NSClipView {
 final class CanvasDocumentView: NSView {
     let model: EditorModel
     private enum DragMode {
-        case none, move(start: CGPoint), resize(corner: Int, original: CGRect), brush(last: CGPoint)
+        case none, move(start: CGPoint), resize(corner: Int, original: CGRect), brush(last: CGPoint), lasso
         /// Rubber-band selection; `base` is the selection to extend (⇧/⌘ held).
         case marquee(start: CGPoint, base: Set<TextBlock.ID>)
     }
     private var dragMode = DragMode.none
     private var mouse: CGPoint?
     private var marquee: CGRect?
+    /// Freehand outline being drawn with the lasso (page pixels).
+    private var lasso: [CGPoint] = []
 
     init(model: EditorModel) {
         self.model = model
@@ -152,6 +154,23 @@ final class CanvasDocumentView: NSView {
                 ctx.stroke(marquee)
             }
         }
+        if lasso.count > 1 {
+            ctx.addLines(between: lasso)
+            ctx.closePath()
+            ctx.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor)
+            ctx.fillPath()
+            ctx.addLines(between: lasso)
+            ctx.closePath()
+            ctx.setLineWidth(line)
+            ctx.setStrokeColor(NSColor.white.cgColor)
+            ctx.strokePath()
+            ctx.addLines(between: lasso)
+            ctx.closePath()
+            ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+            ctx.setLineDash(phase: 0, lengths: [5 / magnification, 4 / magnification])
+            ctx.strokePath()
+            ctx.setLineDash(phase: 0, lengths: [])
+        }
         if model.tool == .heal, model.healPoints.count > 0 {
             ctx.setStrokeColor(NSColor.systemRed.withAlphaComponent(0.35).cgColor)
             ctx.setLineWidth(model.brushSize)
@@ -167,7 +186,7 @@ final class CanvasDocumentView: NSView {
             ctx.strokeLineSegments(between: [CGPoint(x: source.x - s, y: source.y), CGPoint(x: source.x + s, y: source.y),
                                              CGPoint(x: source.x, y: source.y - s), CGPoint(x: source.x, y: source.y + s)])
         }
-        if model.tool != .select, let mouse {
+        if model.tool.isBrush, let mouse {
             let r = model.brushSize / 2
             ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.7).cgColor)
             ctx.setLineWidth(line)
@@ -196,6 +215,11 @@ final class CanvasDocumentView: NSView {
         let p = point(event)
         if model.tool == .select {
             selectDown(at: p, clicks: event.clickCount, extend: !event.modifierFlags.intersection([.shift, .command]).isEmpty)
+            return
+        }
+        if model.tool == .lasso {
+            lasso = [p]
+            dragMode = .lasso
             return
         }
         if model.tool == .clone, event.modifierFlags.contains(.option) {
@@ -257,6 +281,11 @@ final class CanvasDocumentView: NSView {
             let fixed = corners(of: original)[3 - corner]
             let rect = CGRect(x: min(fixed.x, p.x), y: min(fixed.y, p.y), width: max(8, abs(p.x - fixed.x)), height: max(8, abs(p.y - fixed.y)))
             model.drag(to: rect)
+        case .lasso:
+            let clamped = CGPoint(x: min(max(0, p.x), model.pageSize.width), y: min(max(0, p.y), model.pageSize.height))
+            if let last = lasso.last, hypot(clamped.x - last.x, clamped.y - last.y) * magnification < 2 { return }
+            lasso.append(clamped)
+            needsDisplay = true
         case .brush(let last):
             let dirty = model.stroke(to: p, from: last)
             dragMode = .brush(last: p)
@@ -269,6 +298,9 @@ final class CanvasDocumentView: NSView {
         case .move, .resize: model.endDrag()
         case .brush: model.endStroke()
         case .marquee: marquee = nil
+        case .lasso:
+            model.addFromLasso(lasso)
+            lasso = []
         case .none: break
         }
         dragMode = .none
@@ -277,7 +309,7 @@ final class CanvasDocumentView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         mouse = point(event)
-        if model.tool != .select { needsDisplay = true }
+        if model.tool.isBrush { needsDisplay = true }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -298,15 +330,20 @@ final class CanvasDocumentView: NSView {
             return
         }
         if event.keyCode == 53 {   // escape
-            model.selection = []
+            if case .lasso = dragMode {
+                dragMode = .none
+                lasso = []
+                needsDisplay = true
+            } else {
+                model.selection = []
+            }
+            return
+        }
+        if let key = event.charactersIgnoringModifiers?.first, let tool = EditorModel.Tool.allCases.first(where: { $0.key == key }) {
+            model.tool = tool
             return
         }
         switch event.charactersIgnoringModifiers {
-        case "t": model.tool = .select
-        case "e": model.tool = .erase
-        case "h": model.tool = .heal
-        case "c": model.tool = .clone
-        case "r": model.tool = .restore
         case "[": model.brushSize = max(4, model.brushSize / 1.2)
         case "]": model.brushSize = min(200, model.brushSize * 1.2)
         default: super.keyDown(with: event)

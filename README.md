@@ -35,12 +35,13 @@ and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Changes are listed in [CHANGEL
   - Image files are never renamed or deleted.
 - **Pages.**
   - Drag thumbnails to reorder them.
-  - Drop image files on the grid, or use **Add Images**, to copy them into the project.
+  - Drop image files on the grid, or use **Add Images**, to copy them into the project. Images added to the folder in Finder join the project automatically, in name order.
   - Right-click for Move to Start/End, Translate, Edit, Show in Finder, and Remove from Project (which keeps the file).
 - **Translate.**
   - Pick the **source language** in the toolbar.
   - ⌘T translates the current page, also from inside the editor, where your own retouch layers are kept. ⇧⌘T translates every untranslated page.
   - In the reader, ⌥⌘O shows the original pages.
+  - **Problems panel** (⇧⌘M, or the counts in the status bar): failed translations, exports and edits, plus pages where no text was found, each with **Retry** and **Go to Page**. It opens by itself when something fails.
 - **Edit Page** (⌘E, or double-click a page in the reader). ⌘[ / ⌘] move to the previous/next page, saving as you go, and ⌥⌘I shows or hides the side panel, which also hides itself in narrow windows.
   - **Text boxes:** ⇧/⌘-click or drag a rubber band to select several, and ⌘A selects all. Drag to move them; drag a corner to resize one.
   - **Style:**
@@ -49,12 +50,12 @@ and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Changes are listed in [CHANGEL
     - Colours: the colour picker or a **hex code** (`#1E90FF`, `#FFF`).
     - Also outline, alignment and rotation.
   - **Layers:** text boxes plus image layers (the "Text Clean-up" made by translation, and any retouch layers you add). Each layer can be hidden, renamed, reordered, repainted or deleted.
+  - **Lasso** (L): draw around text the app missed. It is read, translated into a new text box, and erased from the page, all in one undo step.
   - **Brushes:** **Erase** (E), **Heal** (H), **Clone** (C, ⌥-click to set the source) and **Unpaint** (R). `[` and `]` change the brush size.
   - Every action is its own undo step (⌘Z).
 - **Typesetting:**
   - Lettering follows each balloon's shape, in a "diamond" from scanlation practice.
   - Each box has a role: dialogue, thought, shout, whisper, narration or sound effect. Roles share styles set in **Translate › Typesetting Presets…**.
-  - **Typeset Check** (⇧⌘K) flags text that doesn't fit, size outliers and lone words, with one-click fixes.
 - **Navigating:**
   - The page sidebar in the reader and editor (⌃⌘S) jumps to and reorders pages.
   - Zoom controls in the status bar set the grid's thumbnail size and the reader's Fit Width or Fit Height. ⌘± and trackpad pinch work too.
@@ -72,7 +73,7 @@ and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Changes are listed in [CHANGEL
 | OCR ja / zh | Baberu OCR int4/int8 (ONNX), Koharu's manga OCR | +109 MB |
 | OCR ko / es / fr / pt | Apple Vision | +55 MB |
 | Translate | Apple Translation (`translationd`, separate process) | 230–280 MB while active, exits when idle |
-| Erase | Flat fill on plain balloons, AOT-GAN (ONNX) on artwork, 256² tiles | +7 MB |
+| Erase | Flat fill on plain balloons, lattice copy on screentone, AOT-GAN (ONNX) on other artwork, 256² tiles | +7 MB |
 
 Only one model is loaded at a time. ONNX Runtime is used through its C API with the CPU arena off.
 The app runs with `MallocSpaceEfficient=1`, so freed model memory goes back to the system.

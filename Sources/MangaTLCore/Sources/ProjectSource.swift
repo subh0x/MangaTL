@@ -96,6 +96,21 @@ public final class ProjectSource: PageSource, @unchecked Sendable {
 
     // MARK: Page management
 
+    /// Re-reads the folder: new images join the project in name order, missing ones leave it (their
+    /// saved work stays on disk). Returns whether the page list changed.
+    public func rescan() throws -> Bool {
+        let images = try Self.imageFiles(in: folder)
+        // An emptied folder (moved, or mid-sync) keeps its pages rather than leaving an empty project.
+        guard !images.isEmpty else { return false }
+        let snapshot: ProjectFile? = lock.withLock {
+            guard file.reconcile(with: images) else { return nil }
+            return file
+        }
+        guard let snapshot else { return false }
+        try? snapshot.save(to: projectFileURL)
+        return true
+    }
+
     /// Copies images into the folder (renaming on clashes) and inserts them at `index`.
     @discardableResult
     public func insert(files urls: [URL], at index: Int) throws -> [PageRef] {

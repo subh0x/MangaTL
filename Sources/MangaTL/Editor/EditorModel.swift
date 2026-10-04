@@ -90,26 +90,41 @@ struct PixelPatch {
 @MainActor @Observable
 final class EditorModel {
     enum Tool: String, CaseIterable, Identifiable {
-        case select = "Text", erase = "Erase", heal = "Heal", clone = "Clone", restore = "Unpaint"
+        case select = "Text", lasso = "Lasso", erase = "Erase", heal = "Heal", clone = "Clone", restore = "Unpaint"
         var id: String { rawValue }
         var symbol: String {
             switch self {
             case .select: "character.cursor.ibeam"
+            case .lasso: "lasso"
             case .erase: "paintbrush"
             case .heal: "bandage"
             case .clone: "rectangle.on.rectangle"
             case .restore: "eraser"
             }
         }
-        var help: String {
+        /// Single-key shortcut (handled by the canvas).
+        var key: Character {
             switch self {
-            case .select: "Select, move and resize text boxes; ⇧-click or drag to select several (T)"
-            case .erase: "Paint over lettering with a solid colour on the selected layer (E)"
-            case .heal: "Paint over lettering on artwork; it is rebuilt with AOT on the selected layer (H)"
-            case .clone: "Copy pixels from elsewhere onto the selected layer; ⌥-click to set the source (C)"
-            case .restore: "Remove paint from the selected layer, revealing what's below (R)"
+            case .select: "t"
+            case .lasso: "l"
+            case .erase: "e"
+            case .heal: "h"
+            case .clone: "c"
+            case .restore: "r"
             }
         }
+        var help: String {
+            switch self {
+            case .select: "Text: select, move and resize text boxes; ⇧-click or drag to select several"
+            case .lasso: "Lasso: draw around text the app missed to read, translate and erase it"
+            case .erase: "Erase: paint over lettering with a solid colour on the selected layer"
+            case .heal: "Heal: paint over lettering on artwork to rebuild what's behind it"
+            case .clone: "Clone: copy pixels from elsewhere onto the selected layer; ⌥-click to set the source"
+            case .restore: "Unpaint: remove paint from the selected layer, revealing what's below"
+            }
+        }
+        /// Tools that paint with the brush.
+        var isBrush: Bool { self != .select && self != .lasso }
     }
 
     let project: ProjectSession
@@ -185,22 +200,6 @@ final class EditorModel {
     var selectedBlocks: [TextBlock] { doc.blocks.filter { selection.contains($0.id) } }
 
     func style(of block: TextBlock) -> TextStyle { project.settings.resolvedStyle(for: block) }
-
-    /// Typesetting warnings for the page (layouts are cached, so this is cheap to recompute).
-    var typesetIssues: [TypesetCheck.Issue] { TypesetCheck.check(doc, settings: project.settings) }
-
-    /// 1-based reading-order number of a block, as shown in the layers list.
-    func blockNumber(_ id: TextBlock.ID) -> Int { (doc.blocks.firstIndex { $0.id == id } ?? 0) + 1 }
-
-    func apply(_ fix: TypesetCheck.Fix, to id: TextBlock.ID) {
-        let settings = project.settings
-        change(fix.title) { doc in
-            guard let i = doc.blocks.firstIndex(where: { $0.id == id }) else { return }
-            var style = settings.resolvedStyle(for: doc.blocks[i])
-            fix.apply(to: &style)
-            doc.blocks[i].style = style
-        }
-    }
 
     /// Makes `block`'s style its role's preset for the project, and lets every box of that role on
     /// this page follow it.
@@ -358,13 +357,101 @@ final class EditorModel {
         }
     }
 
+    /// Runs editor work in the background, one job at a time. A failure goes to the Problems panel
+    /// with a Retry; success clears an earlier failure of the same operation.
     private func run(_ label: String, _ work: @escaping @MainActor () async throws -> Void) {
         guard busy == nil else { return }
         busy = label
+        let operation = label.replacingOccurrences(of: "…", with: "")
         Task {
-            do { try await work() } catch { self.error = error.localizedDescription }
+            do {
+                try await work()
+                project.resolve(operation, page: pageKey)
+            } catch {
+                project.report(operation, page: pageKey, error.localizedDescription) { [weak self] in self?.run(label, work) }
+            }
             busy = nil
         }
+    }
+
+    // MARK: Lasso
+
+    /// Reads and translates the text inside `outline` (page pixels) into a new box, and erases the
+    /// original lettering into the clean-up layer, as one undo step. For text the detector missed.
+    func addFromLasso(_ outline: [CGPoint]) {
+        let bounds = CGRect(origin: .zero, size: pageSize)
+        let rect = outline.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) }.integral.intersection(bounds)
+        guard outline.count > 2, !rect.isNull, rect.width >= 8, rect.height >= 8 else { return }
+        let area = Self.rasterize(outline, in: rect)
+        let window = rect.insetBy(dx: -CGFloat(PagePipeline.healContext), dy: -CGFloat(PagePipeline.healContext)).integral
+            .intersection(bounds)
+        let composite = compositeBuffer(window)
+        let local = rect.offsetBy(dx: -window.minX, dy: -window.minY)
+        let language = project.settings.language
+        run("Reading Selection…") { [page] in
+            let source = try await PagePipeline.shared.reread(page, rect: rect, language: language)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let translation = source.isEmpty ? "" : try await Translator.shared.translate([source], from: language).first ?? ""
+            let erased = try await PagePipeline.shared.erase(composite, rect: local, area: area)
+            self.applyLasso(rect: rect, erased: erased, source: source, translation: translation)
+            if source.isEmpty {
+                self.project.report("Lasso", page: self.pageKey, "No text was read inside the selection. Type the translation into the new box, or draw around the text more closely.",
+                                    severity: .warning)
+            }
+        }
+    }
+
+    private func applyLasso(rect: CGRect, erased: PixelBuffer, source: String, translation: String) {
+        let previousLayer = activeLayer
+        undo.beginUndoGrouping()
+        if !doc.layers.contains(where: { $0.kind == .cleanup }) {
+            commitCanvas()
+            let layer = ImageLayer(name: "Text Clean-up", rect: .zero, kind: .cleanup)
+            change("Add Layer") { $0.layers.insert(layer, at: 0) }
+        }
+        activate(doc.layers.first { $0.kind == .cleanup }?.id)
+        let canvas = activeCanvas()
+        if let layer = activeLayer {
+            let before = PixelPatch(rect: rect, bytes: canvas.bytes(in: rect))
+            for y in 0..<erased.height {
+                for x in 0..<erased.width {
+                    let i = (y * erased.width + x) * 4
+                    guard erased.bytes[i + 3] != 0 else { continue }
+                    canvas.set(Int(rect.minX) + x, Int(rect.minY) + y, (erased.bytes[i], erased.bytes[i + 1], erased.bytes[i + 2], 255))
+                }
+            }
+            commitStroke([before], layer: layer, name: "Erase")
+        }
+        var block = TextBlock(textRect: rect.normalized(in: pageSize), layoutRect: rect.normalized(in: pageSize), shape: .rectangle,
+                              sourceText: source, translation: translation)
+        let role = PagePipeline.guessRole(source: source, translation: translation, inBubble: true)
+        block.role = role == .dialogue ? nil : role
+        change("Add Text") { $0.blocks.append(block) }
+        undo.setActionName("Lasso Text")
+        undo.endUndoGrouping()
+        // Brushes keep painting where they did before.
+        if let previousLayer, doc.layers.contains(where: { $0.id == previousLayer }) { activate(previousLayer) }
+        tool = .select
+        selection = [block.id]
+        pixelsVersion += 1
+    }
+
+    /// Inside-the-outline mask for `rect`, row-major from the top.
+    static func rasterize(_ outline: [CGPoint], in rect: CGRect) -> [Bool] {
+        let w = Int(rect.width), h = Int(rect.height)
+        var bytes = [UInt8](repeating: 0, count: w * h)
+        bytes.withUnsafeMutableBytes { raw in
+            guard let ctx = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return }
+            // Memory rows run top-down; flip so page y (down) maps onto them.
+            ctx.translateBy(x: -rect.minX, y: CGFloat(h) + rect.minY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.setFillColor(gray: 1, alpha: 1)
+            ctx.addLines(between: outline)
+            ctx.closePath()
+            ctx.fillPath()
+        }
+        return bytes.map { $0 >= 128 }
     }
 
     // MARK: Image layers
@@ -554,7 +641,7 @@ final class EditorModel {
                     p.3 = 255
                     canvas.set(x, y, p)
                 case .heal: healMask[y * page.width + x] = true
-                case .select: break
+                case .select, .lasso: break
                 }
             }
         }
@@ -616,13 +703,7 @@ final class EditorModel {
         // Heal the page as currently shown, in a window around the stroke (AOT tiles need context).
         let window = r.insetBy(dx: -CGFloat(PagePipeline.healContext), dy: -CGFloat(PagePipeline.healContext)).integral
             .intersection(CGRect(origin: .zero, size: pageSize))
-        var composite = PixelBuffer(width: Int(window.width), height: Int(window.height))
-        for y in 0..<composite.height {
-            for x in 0..<composite.width {
-                let p = compositePixel(Int(window.minX) + x, Int(window.minY) + y), i = (y * composite.width + x) * 4
-                composite.bytes[i] = p.0; composite.bytes[i + 1] = p.1; composite.bytes[i + 2] = p.2; composite.bytes[i + 3] = 255
-            }
-        }
+        let composite = compositeBuffer(window)
         let local = r.offsetBy(dx: -window.minX, dy: -window.minY)
         run("Healing…") {
             let healed = try await PagePipeline.shared.heal(composite, rect: local, mask: mask)
@@ -639,6 +720,18 @@ final class EditorModel {
             self.commitStroke([before], layer: layer, name: "Heal")
             self.pixelsVersion += 1
         }
+    }
+
+    /// The page as currently shown (original + visible layers) inside `window`.
+    private func compositeBuffer(_ window: CGRect) -> PixelBuffer {
+        var composite = PixelBuffer(width: Int(window.width), height: Int(window.height))
+        for y in 0..<composite.height {
+            for x in 0..<composite.width {
+                let p = compositePixel(Int(window.minX) + x, Int(window.minY) + y), i = (y * composite.width + x) * 4
+                composite.bytes[i] = p.0; composite.bytes[i + 1] = p.1; composite.bytes[i + 2] = p.2; composite.bytes[i + 3] = 255
+            }
+        }
+        return composite
     }
 
     /// Opacity of the active layer at a pixel (for tests and the smoke run).
@@ -669,8 +762,9 @@ final class EditorModel {
             project.store.pruneLayers(page: pageKey, keeping: referenced)
             dirty = false
             project.pageChanged(index)
+            project.resolve("Save", page: pageKey)
         } catch {
-            self.error = error.localizedDescription
+            project.report("Save", page: pageKey, "Couldn't save this page: \(error.localizedDescription)") { [weak self] in self?.save() }
         }
     }
 }

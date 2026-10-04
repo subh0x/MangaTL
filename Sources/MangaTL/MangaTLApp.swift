@@ -49,7 +49,8 @@ struct ContentView: View {
     @State private var readerZoom: ReaderZoom = .column(ReaderLayout.defaultColumnWidth)
     @AppStorage("gridThumbnailSize") private var gridSize: Double = Double(ZoomControls.gridDefault)
     @AppStorage("pageSidebarVisible") private var sidebarPreferred = true
-    @State private var columns: NavigationSplitViewVisibility = .detailOnly
+    @AppStorage("pageSidebarWidth") private var sidebarWidth: Double = 200
+    @AppStorage("problemsPanelVisible") private var problemsVisible = false
     @State private var width: CGFloat = 1100
     @AppStorage("editorInspectorVisible") private var inspectorVisible = true
     private let recents = RecentProjects.shared
@@ -67,8 +68,8 @@ struct ContentView: View {
                 }
                 return true
             }
-            .alert("MangaTL", isPresented: .constant(shownError != nil), presenting: shownError) { _ in
-                Button("OK") { error = nil; project?.dismissError() }
+            .alert("MangaTL", isPresented: .constant(error != nil), presenting: error) { _ in
+                Button("OK") { error = nil }
             } message: { Text($0) }
             .onChange(of: project?.lastTranslated?.token) { reloadEditorIfTranslated() }
             .focusedSceneValue(\.exportAction, project == nil ? nil : ExportAction { openExport() })
@@ -76,12 +77,6 @@ struct ContentView: View {
                 if let project {
                     switch which {
                     case .presets: PresetsView(project: project)
-                    case .typesetCheck:
-                        TypesetCheckView(project: project) { page, block in
-                            edit(page)
-                            editor?.tool = .select
-                            editor?.selection = [block]
-                        }
                     case .export(let scope):
                         ExportView(project: project, scope: scope)
                     }
@@ -115,9 +110,11 @@ struct ContentView: View {
     /// The page sidebar belongs to the reader and editor; the grid already shows every page.
     private var sidebarAvailable: Bool { project != nil && (editor != nil || mode == .reader) }
 
+    /// The page sidebar is part of the window (not a floating split-view column), so there is one
+    /// toggle — ours — and it reads as the same surface as the content.
     private var framed: some View {
-        NavigationSplitView(columnVisibility: $columns) {
-            if let project, sidebarAvailable {
+        HStack(spacing: 0) {
+            if let project, showsSidebar {
                 PageSidebar(project: project, position: position, editorPage: editor?.index) { page in
                     if editor != nil {
                         edit(page)
@@ -126,43 +123,56 @@ struct ContentView: View {
                         position.jump = page
                     }
                 }
-                .navigationSplitViewColumnWidth(min: 160, ideal: 200, max: 260)
-            } else {
-                Color.clear.navigationSplitViewColumnWidth(0)
+                .frame(width: CGFloat(sidebarWidth))
+                .background(.background.secondary)
+                .overlay(alignment: .trailing) { SidebarResizer(width: $sidebarWidth) }
+                .transition(.move(edge: .leading))
             }
-        } detail: {
             detail
         }
-        .onChange(of: columns) { _, new in if sidebarAvailable, width >= Self.sidebarMinWindowWidth { sidebarPreferred = new != .detailOnly } }
-        .onChange(of: sidebarAvailable) { syncColumns() }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0; syncColumns() }
+        .animation(.snappy(duration: 0.2), value: showsSidebar)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .frame(minWidth: 820, minHeight: 560)
         .navigationTitle(project?.title ?? "MangaTL")
         .toolbar { toolbar }
-        // Our own toggle (below) appears only where there is a sidebar; swapping the system one in
-        // and out with a conditional modifier would rebuild the whole window's view tree.
-        .toolbar(removing: .sidebarToggle)
     }
 
     static let sidebarMinWindowWidth: CGFloat = 980
 
-    /// Shows the sidebar when it applies and the user wants it, collapsing it in narrow windows.
-    private func syncColumns() {
-        let show = sidebarAvailable && sidebarPreferred && width >= Self.sidebarMinWindowWidth
-        let target: NavigationSplitViewVisibility = show ? .all : .detailOnly
-        if columns != target { columns = target }
-    }
+    /// The sidebar applies, the user wants it, and the window is wide enough for it.
+    private var showsSidebar: Bool { sidebarAvailable && sidebarPreferred && width >= Self.sidebarMinWindowWidth }
 
     private var detail: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                StatusBar(project: project, position: project == nil ? nil : position, activity: editor?.busy ?? busy) {
-                    if project != nil, editor == nil {
-                        ZoomControls(mode: mode, gridSize: Binding(get: { CGFloat(gridSize) }, set: { gridSize = Double($0) }),
-                                     readerZoom: $readerZoom, readerColumn: ReaderLayout.defaultColumnWidth)
+                VStack(spacing: 0) {
+                    if let project, problemsVisible {
+                        ProblemsPanel(project: project, onGoToPage: { page in
+                            if editor != nil {
+                                edit(page)
+                            } else {
+                                if mode == .grid { mode = .reader }
+                                position.page = page
+                                position.jump = page
+                            }
+                        }, onClose: { problemsVisible = false })
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    StatusBar(project: project, position: project == nil ? nil : position, activity: editor?.busy ?? busy) {
+                        if project != nil, editor == nil {
+                            ZoomControls(mode: mode, gridSize: Binding(get: { CGFloat(gridSize) }, set: { gridSize = Double($0) }),
+                                         readerZoom: $readerZoom, readerColumn: ReaderLayout.defaultColumnWidth)
+                        }
+                    } leading: {
+                        if let project { ProblemsButton(project: project, visible: $problemsVisible) }
                     }
                 }
+                .animation(.snappy(duration: 0.2), value: problemsVisible)
+            }
+            // A new failure opens the panel; warnings only update the count.
+            .onChange(of: project?.problems.last?.id) {
+                if project?.problems.last?.severity == .error { problemsVisible = true }
             }
     }
 
@@ -200,15 +210,12 @@ struct ContentView: View {
     private var sidebarToggle: some View {
         Button {
             sidebarPreferred.toggle()
-            syncColumns()
         } label: {
             Label("Pages", systemImage: "sidebar.left")
         }
         .keyboardShortcut("s", modifiers: [.command, .control])
         .tip("Show or hide the page list", shortcut: "⌃⌘S")
     }
-
-    private var shownError: String? { error ?? project?.lastError }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let project, let editor {
@@ -398,7 +405,9 @@ struct ContentView: View {
     func showGrid() { mode = .grid }
     func setGridSize(_ size: Double) { gridSize = size }
     func setReaderZoom(_ zoom: ReaderZoom) { readerZoom = zoom }
-    func setSidebar(_ visible: Bool) { sidebarPreferred = visible; syncColumns() }
+    func setSidebar(_ visible: Bool) { sidebarPreferred = visible }
+    var problemsShown: Bool { problemsVisible }
+    func showProblems(_ visible: Bool) { problemsVisible = visible }
     #endif
 }
 

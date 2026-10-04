@@ -1,3 +1,4 @@
+import AppKit
 import MangaTLCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -45,6 +46,34 @@ struct PageSidebar: View {
     }
 }
 
+/// The sidebar's right edge: a hairline with a wider invisible handle for dragging its width.
+struct SidebarResizer: View {
+    @Binding var width: Double
+    static let range = 160.0...260.0
+    @State private var start: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(.separator)
+            .frame(width: 1)
+            .frame(maxHeight: .infinity)
+            .overlay {
+                Color.clear
+                    .frame(width: 7)
+                    .contentShape(Rectangle())
+                    .onHover { inside in if inside { NSCursor.columnResize.push() } else { NSCursor.pop() } }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            let base = start ?? width
+                            start = base
+                            width = min(Self.range.upperBound, max(Self.range.lowerBound, base + drag.translation.width))
+                        }
+                        .onEnded { _ in start = nil })
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 /// Dropping a dragged page row before `index` moves it there.
 private struct PageDrop: DropDelegate {
     let index: Int
@@ -74,7 +103,6 @@ private struct PageSidebarRow: View {
     let pageID: String
     let isCurrent: Bool
     @State private var thumbnail: CGImage?
-    @State private var translated = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -89,7 +117,8 @@ private struct PageSidebarRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 3))
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(index + 1)").font(.body.monospacedDigit().weight(.medium))
-                if translated {
+                // Read in body so the mark appears as soon as the page is translated or saved.
+                if project.translatedIDs.contains(pageID) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
                         .accessibilityLabel("Translated")
                 }
@@ -100,7 +129,6 @@ private struct PageSidebarRow: View {
         .padding(.horizontal, 6)
         .background(isCurrent ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 6))
         .task(id: pageID) {
-            translated = project.isTranslated(index)
             let cache = project.cache
             let index = index
             if let hit = cache.cached(index) {

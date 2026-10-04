@@ -37,7 +37,7 @@ final class TooltipPresenter {
     static let delay: TimeInterval = 0.3
 
     private let panel: NSPanel
-    private let host = NSHostingView(rootView: TooltipLabel(text: "", shortcut: nil))
+    private let host = NSHostingView(rootView: TooltipLabel(text: "", shortcut: nil, width: 0))
     private var pending: DispatchWorkItem?
     /// The view whose tooltip is pending or showing.
     private var owner: UUID?
@@ -70,7 +70,7 @@ final class TooltipPresenter {
     }
 
     func show(_ text: String, shortcut: String?, at mouse: NSPoint) {
-        host.rootView = TooltipLabel(text: text, shortcut: shortcut)
+        host.rootView = TooltipLabel(text: text, shortcut: shortcut, width: TooltipLabel.textWidth(text))
         let size = host.fittingSize
         // Below and slightly right of the pointer; above it near the bottom of the screen.
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
@@ -112,20 +112,32 @@ final class TooltipPresenter {
 struct TooltipLabel: View {
     let text: String
     let shortcut: String?
+    /// Width of the text column, measured up front: one line when it fits, else wrapped at
+    /// `maxTextWidth`. A definite width lets the hosting view report the wrapped height.
+    let width: CGFloat
+
+    static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+    static let maxTextWidth: CGFloat = 260
+
+    static func textWidth(_ text: String) -> CGFloat {
+        min(maxTextWidth, ceil((text as NSString).size(withAttributes: [.font: font]).width) + 1)
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(text)
-                .font(.system(size: 12, weight: .medium))
+                .font(Font(Self.font))
                 .foregroundStyle(.white)
+                .lineSpacing(1)
+                .frame(width: width, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             if let shortcut {
                 Text(shortcut)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize()
             }
         }
-        .frame(maxWidth: 280, alignment: .leading)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(
@@ -135,6 +147,5 @@ struct TooltipLabel: View {
                 .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
         )
         .padding(8) // room for the shadow inside the panel
-        .fixedSize()
     }
 }

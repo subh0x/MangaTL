@@ -36,13 +36,12 @@ enum ExportScope: Equatable {
 
 /// Project-level sheets opened from menus.
 enum ProjectSheet: Identifiable, Equatable {
-    case presets, typesetCheck
+    case presets
     case export(ExportScope)
 
     var id: String {
         switch self {
         case .presets: "presets"
-        case .typesetCheck: "typesetCheck"
         case .export: "export"
         }
     }
@@ -70,8 +69,6 @@ struct TranslateMenu: View {
             }
             Divider()
             Button("Typesetting Presets…") { onShow(.presets) }
-            Button("Typeset Check…") { onShow(.typesetCheck) }
-                .keyboardShortcut("k", modifiers: [.command, .shift])
             Divider()
             Button("Revert This Page to Original") { project.revert(page: editor?.index ?? position.page) }
                 .disabled(editor != nil)
@@ -103,16 +100,19 @@ struct TranslateMenu: View {
 }
 
 /// Bottom bar, shown in every mode: activity on the left, page and memory on the right.
-struct StatusBar<Trailing: View>: View {
+struct StatusBar<Trailing: View, Leading: View>: View {
     let project: ProjectSession?
     let position: ReadingPosition?
     /// Editor work in progress (e.g. "Healing…").
     var activity: String?
     /// Mode-specific controls next to the page counter (zoom).
     @ViewBuilder var trailing: () -> Trailing
+    /// Shown first (the problems count).
+    @ViewBuilder var leading: () -> Leading
 
     var body: some View {
         HStack(spacing: 12) {
+            leading()
             if let project {
                 TranslationStatus(project: project)
             }

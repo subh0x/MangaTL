@@ -57,14 +57,24 @@ public struct ProjectFile: Codable, Equatable, Sendable {
     }
 
     /// Matches `pages` to the image files actually in the folder: files that disappeared are
-    /// dropped, new files are appended in Finder order. Returns whether anything changed.
+    /// dropped, new files are inserted after their predecessor in Finder order. Returns whether
+    /// anything changed.
     @discardableResult
     public mutating func reconcile(with files: [String]) -> Bool {
         let present = Set(files)
         let before = pages
         pages.removeAll { !present.contains($0.file) }
         let known = Set(pages.map(\.file))
-        pages += files.filter { !known.contains($0) }.map { PageRef(file: $0) }
+        // `files` is in natural order: put each new file right after the page that precedes it
+        // there, so "page 12a.jpg" lands next to page 12 rather than at the end.
+        var previous: String?
+        for name in files {
+            if !known.contains(name) {
+                let at = previous.flatMap { p in pages.firstIndex { $0.file == p } }.map { $0 + 1 } ?? 0
+                pages.insert(PageRef(file: name), at: at)
+            }
+            previous = name
+        }
         return pages != before
     }
 }

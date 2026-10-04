@@ -5,8 +5,9 @@ import Foundation
 /// everything else transparent, so the source page is never modified.
 ///
 /// Text on a flat balloon is filled with the balloon's own colour (exact and instant); text over
-/// artwork goes through AOT-GAN (Koharu's default inpainter) in 256² tiles — the tile size Phase 0
-/// measured at +150 MB peak, versus +400 MB at 512².
+/// screentone is rebuilt along the tone's dot lattice (`ToneFill`); other artwork goes through
+/// AOT-GAN (Koharu's default inpainter) in 256² tiles — the tile size Phase 0 measured at +150 MB
+/// peak, versus +400 MB at 512².
 enum Inpainter {
     static let tile = 256
     static let context = 24
@@ -26,7 +27,11 @@ enum Inpainter {
         var patch = PixelBuffer(width: page.width, height: page.height)
         let jobs = regions.map { job(page: page, region: $0) }
         for job in jobs { if let color = job.flatColor { fill(&patch, job: job, color: color) } }
-        let artwork = jobs.filter { $0.flatColor == nil }
+        let artwork = jobs.filter { job in
+            guard job.flatColor == nil else { return false }
+            let others = jobs.map(\.rect).filter { $0 != job.rect }
+            return !ToneFill.fill(&patch, page: page, rect: job.rect, mask: job.mask, avoid: others)
+        }
         if !artwork.isEmpty {
             try OnnxModel.withSession(.inpainter) { session in
                 for job in artwork { try inpaint(&patch, page: page, job: job, session: session) }
@@ -35,17 +40,39 @@ enum Inpainter {
         return patch
     }
 
-    /// Heals an arbitrary user-painted mask (editor brush) with AOT.
+    /// Heals an arbitrary user-painted mask (editor brush): screentone along its lattice, else AOT.
     static func heal(_ page: PixelBuffer, rect: CGRect, mask: [Bool]) throws -> PixelBuffer {
         var patch = PixelBuffer(width: page.width, height: page.height)
         let job = Job(rect: rect, mask: mask, flatColor: nil)
-        try OnnxModel.withSession(.inpainter) { session in try inpaint(&patch, page: page, job: job, session: session) }
+        if !ToneFill.fill(&patch, page: page, rect: rect, mask: mask) {
+            try OnnxModel.withSession(.inpainter) { session in try inpaint(&patch, page: page, job: job, session: session) }
+        }
+        return patch.cropped(to: rect)
+    }
+
+    /// Erases lettering inside a user-drawn outline (`area`: rect-sized, row-major, true = inside).
+    /// On a flat balloon only the ink is filled; on artwork the whole outline is rebuilt, like the
+    /// automatic clean-up. Returns a rect-sized buffer, erased pixels opaque.
+    static func erase(_ page: PixelBuffer, rect: CGRect, area: [Bool]) throws -> PixelBuffer {
+        var job = job(page: page, region: rect, grow: 0)
+        let w = Int(rect.width), jw = Int(job.rect.width), jx = Int(job.rect.minX), jy = Int(job.rect.minY)
+        for i in job.mask.indices {
+            let x = jx + i % jw - Int(rect.minX), y = jy + i / jw - Int(rect.minY)
+            let inside = x >= 0 && y >= 0 && x < w && y < Int(rect.height) && area[y * w + x]
+            if !inside || job.flatColor == nil { job.mask[i] = inside }
+        }
+        var patch = PixelBuffer(width: page.width, height: page.height)
+        if let color = job.flatColor {
+            fill(&patch, job: job, color: color)
+        } else if !ToneFill.fill(&patch, page: page, rect: job.rect, mask: job.mask) {
+            try OnnxModel.withSession(.inpainter) { session in try inpaint(&patch, page: page, job: job, session: session) }
+        }
         return patch.cropped(to: rect)
     }
 
     /// Builds the ink mask for one text region and decides whether a flat fill is enough.
-    static func job(page: PixelBuffer, region: CGRect) -> Job {
-        let rect = region.insetBy(dx: -4, dy: -4).integral.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
+    static func job(page: PixelBuffer, region: CGRect, grow: CGFloat = 4) -> Job {
+        let rect = region.insetBy(dx: -grow, dy: -grow).integral.intersection(CGRect(x: 0, y: 0, width: page.width, height: page.height))
         let crop = page.cropped(to: rect)
         let luma = crop.luma()
         // Balloon colour = the most common luma bucket (glyphs are a minority of the box).

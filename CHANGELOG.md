@@ -12,7 +12,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **Balloon roles:** dialogue, thought, shout, whisper, narration, sound effect. Guessed during translation and changeable in the inspector.
   - **Typesetting Presets** (Translate › Typesetting Presets…): a style per role with a live preview. Defaults: italic thoughts, bold-italic shouts at 130% height, whispers at 85%, and an outline on narration and sound effects.
   - **New style options:** bold and italic faces, width and height scale, space inside the balloon, auto-fit scale.
-  - **Typeset Check:** warns about text that doesn't fit, size outliers on a page, a lone short word on the last line, mixed fixed sizes within a role, and text touching the edge. One-click fixes are offered where possible. It appears in the editor's inspector and project-wide (⇧⌘K).
 
 - **Page sidebar** in the reader and editor: numbered thumbnails with ✓ on translated pages. Click to jump; drag to reorder. Toggle with ⌃⌘S; it collapses on its own in narrow windows.
 - **Zoom:**
@@ -27,15 +26,23 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **Format:** JPEG, PNG or HEIC with a quality setting, at original, working or custom size.
   - **Package:** a folder with a name pattern, a CBZ or a PDF.
   - The last choices are remembered per project.
+- **Lasso tool** (L) in the editor: draw around text the detector missed to read, translate and erase it in one undoable step.
+- **Problems panel** (⇧⌘M): a collapsible bottom panel listing failed translations, exports and edits, and pages with no text found, each with Retry and Go to Page. It opens on new errors, and the status bar shows the counts.
+- **Folder watching:** images added to or removed from a project folder outside the app update the project within a second, in name order.
+- **Screentone-aware erasing:** text over dot tones, including gradient and duotone tones, is rebuilt along the tone's own dot lattice instead of being smeared into a grey blob. This applies to the automatic clean-up, the Heal brush and the Lasso.
 - **Editor brush colour:** in the toolbar it is now a small swatch that opens a popover with the colour picker, hex field and recent colours.
 
 ### Fixed
 - PDF pages smaller than the requested size were drawn unscaled in the corner of a white page. This affected Import PDF. PDF pages now scale to the requested size, at up to 300 dpi.
 - The reader refreshes a page as soon as its translation finishes. Previously only the most recently created page view was notified.
 - Hovering a control could lose its tooltip when another view disappeared.
+- Translated ✓ marks in the page sidebar appear as soon as a page is translated or saved.
+- The brush-size control in the toolbar had no left padding.
 
 ### Changed
 - The outline is drawn outside the glyphs. New projects letter dialogue without an outline by default.
+- **Page sidebar** is now part of the window, with a single toggle and a draggable edge, instead of a floating split-view column that brought a second toggle.
+- **Tooltips:** each editor tool has its own tooltip, and long tooltips wrap onto two lines at the right height.
 
 ## [0.1.0] - 2026-10-04
 

@@ -37,7 +37,8 @@ fonts/                       fonts imported by the user
 4. **Translate** with the Apple Translation framework (`Translator`): one session per language, released after 60 s idle so `translationd` can exit.
 5. **Erase** (`Inpainter`):
    - flat balloons are filled with the balloon's own colour
-   - text over artwork is rebuilt with AOT-GAN in 256² tiles
+   - text over screentone is rebuilt by `ToneFill`: it finds the dot lattice from the surroundings (autocorrelation, refined to sub-pixel periods), fills each erased pixel from untouched pixels at the same lattice position on opposite sides, and snaps the blend back to the tone's two inks, so dots stay crisp across gradients
+   - other artwork is rebuilt with AOT-GAN in 256² tiles
    - the result becomes the page's "Text Clean-up" image layer
 6. **Save** the `PageDoc`. Text stays live; `PageRenderer` composites page + visible layers + typeset text for display and export.
 

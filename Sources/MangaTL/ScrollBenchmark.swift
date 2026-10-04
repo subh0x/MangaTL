@@ -169,8 +169,34 @@ enum SmokeRun {
         view.showReader()
         project.translate(pages: [0, 1], redo: true)
         await waitForTranslation(project, peak: &peak)
-        log("translated \(project.translatedCount) pages, peak \(Int(peak)) MB, error \(project.lastError ?? "none")")
+        log("translated \(project.translatedCount) pages, peak \(Int(peak)) MB, problems \(project.problems.isEmpty ? "none" : project.problems.map(\.message).joined(separator: "; "))")
+        log("translated marks: \(project.pages.prefix(2).map { project.translatedIDs.contains($0.id) })")
         await snapshot(width: 1000, name: "reader")
+
+        // An image dropped into the folder from outside joins the project in name order.
+        let first = project.pages[0].file
+        let outside = copy.appendingPathComponent((first as NSString).deletingPathExtension + "a." + (first as NSString).pathExtension)
+        let before = project.count
+        try? fm.copyItem(at: copy.appendingPathComponent(first), to: outside)
+        let watchStart = Date()
+        while project.count == before, Date().timeIntervalSince(watchStart) < 3 { try? await Task.sleep(for: .milliseconds(20)) }
+        log(String(format: "folder watch: %d → %d pages after %.2f s, new page at %d", before, project.count, Date().timeIntervalSince(watchStart),
+                   (project.pages.firstIndex { $0.file == outside.lastPathComponent } ?? -1) + 1))
+        try? fm.removeItem(at: outside)
+        try? await Task.sleep(for: .seconds(1))
+        log("folder watch: removed → \(project.count) pages")
+
+        // A failing export lands in the Problems panel (which opens itself); Retry fails again.
+        project.export(pages: [0], options: ExportOptions(), to: URL(fileURLWithPath: "/System/mangatl-smoke/out.cbz"))
+        while project.isTranslating { try? await Task.sleep(for: .milliseconds(20)) }
+        try? await Task.sleep(for: .milliseconds(400))
+        log("problems after failed export: \(project.problems.map { "\($0.operation): \($0.message)" }), panel \(view.problemsShown)")
+        await snapshot(width: 1200, name: "problems")
+        if let problem = project.problems.first { project.retry(problem) }
+        while project.isTranslating { try? await Task.sleep(for: .milliseconds(20)) }
+        log("after retry: \(project.problems.count) problem(s)")
+        project.clearProblems()
+        view.showProblems(false)
 
         // Sidebar open / collapsed / narrow window, reader fit modes.
         view.setSidebar(true)
@@ -198,7 +224,7 @@ enum SmokeRun {
         // Tooltip: appears after ~300 ms (measured once the window is idle).
         try? await Task.sleep(for: .seconds(1.5))
         let start = Date()
-        TooltipPresenter.shared.schedule("Translate this page", shortcut: "⌘T")
+        TooltipPresenter.shared.schedule("Lasso: draw around text the app missed to read, translate and erase it", shortcut: "L")
         while !TooltipPresenter.shared.isVisible, Date().timeIntervalSince(start) < 2 { try? await Task.sleep(for: .milliseconds(5)) }
         log(String(format: "tooltip visible after %.0f ms", Date().timeIntervalSince(start) * 1000))
         try? await Task.sleep(for: .milliseconds(200))
@@ -209,7 +235,7 @@ enum SmokeRun {
         }
         TooltipPresenter.shared.hide()
 
-        for which in [ProjectSheet.presets, .typesetCheck, .export(.all)] {
+        for which in [ProjectSheet.presets, .export(.all)] {
             view.show(which)
             try? await Task.sleep(for: .seconds(1.5))
             snapshotWindow(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_sheet_\(which.id).png"), sheet: true)
@@ -221,6 +247,7 @@ enum SmokeRun {
         try? await Task.sleep(for: .milliseconds(500))
         guard let editor = view.currentEditor else { log("no editor"); NSApp.terminate(nil); return }
         await edit(editor, canvasSnapshot: copy.appendingPathComponent("../mangatl_editor_canvas.jpg").standardized)
+        await lasso(editor)
         for fit in [EditorCanvas.ZoomCommand.fitWidth, .fitHeight] {
             editor.zoomCommand = fit
             try? await Task.sleep(for: .milliseconds(500))
@@ -258,6 +285,34 @@ enum SmokeRun {
         }
         RecentProjects.shared.entries.filter { $0.path.contains("mangatl-smoke-") }.forEach { RecentProjects.shared.remove($0) }
         NSApp.terminate(nil)
+    }
+
+    /// Deletes a detected box, then lassos its lettering: the box comes back (read + translated) with
+    /// the lettering erased, and one undo removes both.
+    static func lasso(_ model: EditorModel) async {
+        func log(_ s: String) { SmokeRun.log("lasso: \(s)") }
+        guard let target = model.doc.blocks.first(where: { !$0.sourceText.isEmpty }) else { log("no text block"); return }
+        let rect = target.textRect.denormalized(to: model.pageSize).insetBy(dx: -6, dy: -6)
+        model.selection = [target.id]
+        model.deleteSelected()
+        let blocks = model.doc.blocks.count
+        let outline = (0..<24).map { i -> CGPoint in
+            let a = Double(i) / 24 * 2 * .pi
+            return CGPoint(x: rect.midX + cos(a) * rect.width * 0.62, y: rect.midY + sin(a) * rect.height * 0.62)
+        }
+        let probe = (Int(rect.midX), Int(rect.midY))
+        model.addFromLasso(outline)
+        let start = Date()
+        while model.busy != nil, Date().timeIntervalSince(start) < 30 { try? await Task.sleep(for: .milliseconds(50)) }
+        let added = model.doc.blocks.last
+        let cleanup = model.doc.layers.first { $0.kind == .cleanup }
+        log(String(format: "%.1f s; blocks %d → %d, read \"%@\" → \"%@\", cleanup layer %@, centre alpha %d",
+                   Date().timeIntervalSince(start), blocks, model.doc.blocks.count, String((added?.sourceText ?? "").prefix(20)),
+                   String((added?.translation ?? "").prefix(30)), cleanup == nil ? "missing" : "present", model.activeLayerAlpha(probe.0, probe.1)))
+        model.undo.undo()
+        log("undo → blocks \(model.doc.blocks.count), undo name was \"\(model.undo.redoActionName)\"")
+        model.undo.redo()
+        log("redo → blocks \(model.doc.blocks.count)")
     }
 
     /// Drives the editor model the way the canvas does and snapshots the canvas to `out`.
@@ -298,8 +353,19 @@ enum SmokeRun {
         log("inspector survived delete / undo / deselect, \(model.doc.blocks.count) blocks")
         if ProcessInfo.processInfo.environment["MANGATL_SMOKE_HOLD"] != nil {
             model.selection = [first.id]
-            log("holding 10 s with inspector visible")
-            try? await Task.sleep(for: .seconds(10))
+            log("holding 10 s with inspector visible, moving the mouse over the window")
+            // Mouse-moved events through the normal routing (tracking areas, hit testing).
+            if let window = NSApp.windows.first(where: { $0.isVisible }) {
+                for i in 0..<500 {
+                    let p = NSPoint(x: 100 + Double(i * 7 % 1100), y: 100 + Double(i * 13 % 600))
+                    if let event = NSEvent.mouseEvent(with: .mouseMoved, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+                        NSApp.sendEvent(event)
+                    }
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+                log("mouse moves done")
+            }
             model.selection = []
         }
 

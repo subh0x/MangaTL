@@ -79,8 +79,14 @@ public actor PagePipeline {
         try Inpainter.heal(page, rect: rect, mask: mask)
     }
 
+    /// Erases the lettering inside a lasso outline (`area` is rect-sized, row-major, true = inside).
+    /// Returns a rect-sized buffer: erased pixels opaque, everything else transparent.
+    public func erase(_ page: PixelBuffer, rect: CGRect, area: [Bool]) throws -> PixelBuffer {
+        try Inpainter.erase(page, rect: rect, area: area)
+    }
+
     /// A first guess at what kind of lettering a block is; the user can change it in the editor.
-    static func guessRole(source: String, translation: String, inBubble: Bool) -> TextRole {
+    public static func guessRole(source: String, translation: String, inBubble: Bool) -> TextRole {
         let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
         let exclamations = trimmed.filter { $0 == "!" || $0 == "！" }.count
         if !inBubble {

@@ -31,6 +31,16 @@ import Testing
         #expect(reopened.pageKey(at: 0) == keptID)
     }
 
+    @Test func rescanInsertsNewFilesInNameOrder() throws {
+        let source = try ProjectSource(folder: fixture.folder)
+        #expect(try !source.rescan())
+        try Fixture.writeJPEG(size: CGSize(width: 800, height: 1200), to: fixture.folder.appendingPathComponent("p1a.jpg"))
+        #expect(try source.rescan())
+        #expect(source.pages.map(\.file) == ["p1.jpg", "p1a.jpg", "p2.jpg", "p10.jpg"])
+        // Saved, so reopening keeps the order.
+        #expect(try ProjectSource(folder: fixture.folder).pages.map(\.file) == source.pages.map(\.file))
+    }
+
     @Test func reorderingKeepsEachPagesTranslation() throws {
         let project = try ProjectSource(folder: fixture.folder)
         let ids = project.pages.map(\.id)
