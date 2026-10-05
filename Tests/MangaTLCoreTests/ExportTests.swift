@@ -138,3 +138,37 @@ import ZIPFoundation
         #expect(try ProjectSource(folder: fixture.folder).exportOptions == options)
     }
 }
+
+@Suite struct EditedThumbnailTests {
+    /// Luma of the thumbnail pixel at (x, y) from the top-left.
+    static func luma(_ image: CGImage, _ x: Int, _ y: Int) -> Int {
+        let pixels = PixelBuffer(image)
+        let i = (y * pixels.width + x) * 4
+        return (299 * Int(pixels.bytes[i]) + 587 * Int(pixels.bytes[i + 1]) + 114 * Int(pixels.bytes[i + 2])) / 1000
+    }
+
+    @Test func thumbnailsShowSavedEditsAndFollowNewOnes() throws {
+        let (fixture, source) = try ExportTests.project()
+        let cache = ThumbnailCache(source: source, root: fixture.root.appendingPathComponent("thumbs"))
+        let original = try cache.load(1)
+        cache.setEdits(store: source.store, settings: ProjectSettings())
+        // Page 2's clean-up layer is a black 100×100 square at the top-left of a 1000×1500 page.
+        let edited = try cache.load(1)
+        #expect(Self.luma(edited, 5, 5) < 40, "the visible layer is drawn onto the thumbnail")
+        #expect(Self.luma(original, 5, 5) > 100)
+        #expect(cache.cached(1) != nil)
+
+        // A later edit (layer hidden) gets a new thumbnail rather than the cached one.
+        let key = source.pageKey(at: 1)
+        var doc = try #require(source.store.loadPage(key))
+        for i in doc.layers.indices { doc.layers[i].visible = false }
+        Thread.sleep(forTimeInterval: 0.05)
+        try source.store.save(doc, page: key)
+        #expect(cache.cached(1) == nil, "the saved edit changes the thumbnail's key")
+        #expect(Self.luma(try cache.load(1), 5, 5) > 100)
+
+        // Pages without saved work keep the original thumbnail.
+        #expect(try cache.load(0) === (try cache.load(0)))
+        #expect(!source.store.hasPage(source.pageKey(at: 0)))
+    }
+}

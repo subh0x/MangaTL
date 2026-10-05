@@ -198,7 +198,8 @@ private struct PageSidebarRow: View {
         .onHover { hovering = $0 }
         // Lazy stacks keep rows they've created; drop the image when scrolled away (it is cached).
         .onDisappear { thumbnail = nil }
-        .task(id: "\(pageID)-\(large)") {
+        // Reloads after edits too: the cache draws a page's saved work onto its thumbnail.
+        .task(id: "\(pageID)-\(large)-\(project.thumbnailsVersion)") {
             let cache = project.cache
             let (index, large) = (index, large)
             if let hit = cache.cached(index, large: large) {

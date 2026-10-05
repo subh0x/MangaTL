@@ -11,8 +11,15 @@ final class ProjectSession {
     var store: ProjectStore { source.store }
 
     var settings: ProjectSettings {
-        didSet { source.settings = settings }
+        didSet {
+            source.settings = settings
+            cache.setEdits(store: store, settings: settings)
+            thumbnailsVersion += 1
+        }
     }
+    /// Bumped when any page's look may have changed (an edit, translation or style change), so
+    /// views showing thumbnails load them again.
+    private(set) var thumbnailsVersion = 0
     /// Mirrors the project's page order so views update when pages are added or moved.
     private(set) var pages: [PageRef]
 
@@ -42,6 +49,7 @@ final class ProjectSession {
         settings = source.settings
         if settings.style.fontName == TextStyle.previousDefaultFontName { settings.style.fontName = TextStyle.defaultFontName }
         source.store.registerFonts()
+        cache.setEdits(store: source.store, settings: settings)
         translatedIDs = Set(pages.lazy.map(\.id).filter(source.store.hasPage))
         watchFolder()
     }
@@ -174,6 +182,7 @@ final class ProjectSession {
             if store.hasPage(id) { translatedIDs.insert(id) } else { translatedIDs.remove(id) }
             detectedLanguages[id] = nil
             detectedLanguagesVersion += 1
+            thumbnailsVersion += 1
         }
         liveObservers.forEach { $0.pageChanged(index) }
     }

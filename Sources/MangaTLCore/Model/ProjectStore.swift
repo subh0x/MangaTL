@@ -56,6 +56,11 @@ public final class ProjectStore: Sendable {
 
     public func hasPage(_ page: String) -> Bool { FileManager.default.fileExists(atPath: pageURL(page).path) }
 
+    /// When the page's work was last saved (nil if it has none). Layers are saved with the page doc.
+    public func pageModified(_ page: String) -> Date? {
+        try? pageURL(page).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
     public func loadPage(_ page: String) -> PageDoc? {
         guard let data = try? Data(contentsOf: pageURL(page)) else { return nil }
         return try? JSONDecoder().decode(PageDoc.self, from: data)
