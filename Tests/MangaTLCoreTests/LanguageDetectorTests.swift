@@ -57,6 +57,9 @@ struct LanguageDetectorPageTests {
         print("AUTO ja_P01: \(found.value?.rawValue ?? "none"), footprint \(Int(baseline)) → peak \(Int(peak)) MB")
         // A Korean project setting must not stop a Japanese page being read as Japanese.
         #expect(found.value == .japanese)
+        // Saved with the page, so the language menu can name it later.
+        #expect(doc.detectedLanguage == .japanese)
+        #expect(source.store.loadPage(source.pageKey(at: 0))?.detectedLanguage == .japanese)
         #expect(peak - baseline < 250, "auto language stage exceeded the app memory budget")
         #expect(doc.blocks.filter { !$0.translation.isEmpty }.count >= 3)
     }

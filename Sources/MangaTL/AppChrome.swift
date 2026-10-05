@@ -5,6 +5,15 @@ import UniformTypeIdentifiers
 
 struct LanguageMenu: View {
     @Bindable var project: ProjectSession
+    /// The page shown (reader) or edited; Auto names the language detected for it.
+    let position: ReadingPosition
+    var editorPage: Int?
+
+    /// With Auto, only a language actually identified for this page is shown, never a guess.
+    private var title: String {
+        guard project.settings.autoLanguage == true else { return project.settings.language.displayName }
+        return project.detectedLanguage(ofPage: editorPage ?? position.page).map { "Auto · \($0.displayName)" } ?? "Auto"
+    }
 
     var body: some View {
         Menu {
@@ -26,13 +35,12 @@ struct LanguageMenu: View {
             .pickerStyle(.inline)
             Toggle("Read right to left", isOn: $project.settings.rightToLeft)
         } label: {
-            Label(project.settings.autoLanguage == true ? "Auto · \(project.settings.language.displayName)" : project.settings.language.displayName,
-                  systemImage: "globe")
+            Label(title, systemImage: "globe")
                 .labelStyle(.titleAndIcon)
                 .lineLimit(1)
         }
         .tip(project.settings.autoLanguage == true
-             ? "Auto: each page's language is identified when it is translated (last found: \(project.settings.language.displayName))"
+             ? "Auto: each page's language is identified when it is translated"
              : "Language the manga is written in")
     }
 }

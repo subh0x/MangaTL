@@ -199,6 +199,11 @@ final class EditorModel {
     var selectedBlock: TextBlock? { selection.count == 1 ? doc.blocks.first { selection.contains($0.id) } : nil }
     var selectedBlocks: [TextBlock] { doc.blocks.filter { selection.contains($0.id) } }
 
+    /// The page's language: what Auto identified for it, else the project's.
+    var language: SourceLanguage {
+        project.settings.autoLanguage == true ? doc.detectedLanguage ?? project.settings.language : project.settings.language
+    }
+
     func style(of block: TextBlock) -> TextStyle { project.settings.resolvedStyle(for: block) }
 
     /// Makes `block`'s style its role's preset for the project, and lets every box of that role on
@@ -336,7 +341,7 @@ final class EditorModel {
         let blocks = selectedBlocks.filter { !$0.sourceText.isEmpty }
         guard !blocks.isEmpty else { return }
         run("Translating…") { [project] in
-            let texts = try await Translator.shared.translate(blocks.map(\.sourceText), from: project.settings.language)
+            let texts = try await Translator.shared.translate(blocks.map(\.sourceText), from: self.language)
             let byID = Dictionary(uniqueKeysWithValues: zip(blocks.map(\.id), texts))
             self.change("Translate") { doc in
                 for i in doc.blocks.indices { if let t = byID[doc.blocks[i].id] { doc.blocks[i].translation = t } }
@@ -348,10 +353,10 @@ final class EditorModel {
         guard let block = selectedBlock else { return }
         let rect = block.textRect.denormalized(to: pageSize)
         run("Reading…") { [project, page] in
-            let text = try await PagePipeline.shared.reread(page, rect: rect, language: project.settings.language)
+            let text = try await PagePipeline.shared.reread(page, rect: rect, language: self.language)
             self.updateSelected("Read Text") { $0.sourceText = text }
             if !text.isEmpty {
-                let translated = try await Translator.shared.translate([text], from: project.settings.language).first ?? ""
+                let translated = try await Translator.shared.translate([text], from: self.language).first ?? ""
                 self.updateSelected("Translate") { $0.translation = translated }
             }
         }
@@ -387,7 +392,7 @@ final class EditorModel {
             .intersection(bounds)
         let composite = compositeBuffer(window)
         let local = rect.offsetBy(dx: -window.minX, dy: -window.minY)
-        let language = project.settings.language
+        let language = self.language
         run("Reading Selection…") { [page] in
             let source = try await PagePipeline.shared.reread(page, rect: rect, language: language)
                 .trimmingCharacters(in: .whitespacesAndNewlines)

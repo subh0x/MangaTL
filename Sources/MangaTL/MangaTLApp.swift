@@ -214,7 +214,7 @@ struct ContentView: View {
             }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
-                LanguageMenu(project: project)
+                LanguageMenu(project: project, position: position, editorPage: editor.index)
                 TranslateMenu(project: project, position: position, editor: editor) { sheet = $0 }
             }
         } else if let project {
@@ -225,7 +225,7 @@ struct ContentView: View {
                         .tip("Back to all pages (Esc)")
                 }
             }
-            ToolbarItem { LanguageMenu(project: project) }
+            ToolbarItem { LanguageMenu(project: project, position: position) }
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 TranslateMenu(project: project, position: position) { sheet = $0 }

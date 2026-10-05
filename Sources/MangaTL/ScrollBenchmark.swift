@@ -121,6 +121,14 @@ enum SmokeRun {
         print("SMOKE window snapshot \(rep.pixelsWide)x\(rep.pixelsHigh) → \(url.lastPathComponent)")
     }
 
+    /// The page actually at the top of the reader's scroll view (not the published position).
+    static func readerShownPage() -> Int? {
+        guard let collection = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: NSCollectionView.self) }).first,
+              let layout = collection.collectionViewLayout as? ReaderLayout,
+              let top = collection.enclosingScrollView?.contentView.bounds.minY else { return nil }
+        return layout.index(atY: top + ReaderLayout.spacing + 1)
+    }
+
     /// Height of each toolbar item as laid out in the real window.
     static func logToolbar(_ name: String) {
         guard let toolbar = NSApp.windows.first(where: { $0.isVisible })?.toolbar else { return }
@@ -189,6 +197,20 @@ enum SmokeRun {
             try? await Task.sleep(for: .milliseconds(500))
             landed.append(view.currentPage)
         }
+        // Auto names a language only for pages it has identified.
+        project.settings.autoLanguage = true
+        let languageBefore = project.detectedLanguage(ofPage: 1)
+        project.translate(pages: [1], redo: true)
+        await waitForTranslation(project, peak: &peak)
+        log("auto: page 2 language before \(languageBefore?.rawValue ?? "none"), after \(project.detectedLanguage(ofPage: 1)?.rawValue ?? "none"), page 3 \(project.detectedLanguage(ofPage: 2)?.rawValue ?? "none")")
+        project.settings.autoLanguage = nil
+
+        // Closing the editor returns to the page that was edited, not page 1.
+        view.edit(2)
+        try? await Task.sleep(for: .milliseconds(500))
+        view.closeEditor()
+        try? await Task.sleep(for: .milliseconds(1200))
+        log("close editor on page 3 → current page \(view.currentPage + 1), showing page \(readerShownPage().map { "\($0 + 1)" } ?? "?")")
         log("sidebar jumps to pages \(Array(0..<project.count)) → current \(landed)")
         log("translated marks: \(project.pages.prefix(2).map { project.translatedIDs.contains($0.id) })")
         await snapshot(width: 1000, name: "reader")

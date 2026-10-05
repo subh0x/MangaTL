@@ -26,7 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **Format:** JPEG, PNG or HEIC with a quality setting, at original, working or custom size.
   - **Package:** a folder with a name pattern, a CBZ or a PDF.
   - The last choices are remembered per project.
-- **Auto source language:** choose Auto in the language menu to identify each page's language from the script and words of most of its text when it is translated, then read and translate it in that language. The menu shows the last language found (for example "Auto · Japanese"), and the editor uses it.
+- **Auto source language:** choose Auto in the language menu to identify each page's language from the script and words of most of its text when it is translated, then read and translate it in that language. The menu shows just "Auto" until the page you're on has been translated, then names the language found for that page (for example "Auto · Japanese"). The language is saved with the page, and the editor uses it.
 - **Delete pages from the sidebar:** ⌘/⇧-click to select several pages, then press Delete or use the right-click menu. The image files stay in the folder.
 - **Lasso tool** (L) in the editor: draw around text the detector missed to read, translate and erase it in one undoable step.
 - **Problems panel** (⇧⌘M): a collapsible bottom panel listing failed translations, exports and edits, and pages with no text found, each with Retry and Go to Page. It opens on new errors, and the status bar shows the counts.
@@ -43,6 +43,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Pages removed from a project came back on the next folder rescan or reopen. Removed files are now remembered, and Add Images brings them back.
 - Adding an image that is already in the project folder no longer makes a renamed copy of it.
 - The brush-size control in the toolbar had no left padding.
+- Closing the editor showed page 1 although the page number said otherwise. The reader is now scrolled to the edited page once it has its size.
 
 ### Changed
 - The outline is drawn outside the glyphs. New projects letter dialogue without an outline by default.

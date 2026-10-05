@@ -69,6 +69,10 @@ struct PageCollectionView: NSViewRepresentable {
         context.coordinator.setGridSize(gridSize, anchor: false)
         context.coordinator.readerZoom = readerZoom
         context.coordinator.apply(mode: mode, scrollTo: position.page)
+        // A new view (e.g. after closing the editor) has no size yet, so that scroll lands at the
+        // top: scroll again once it is laid out in the window.
+        context.coordinator.pendingPage = position.page
+        DispatchQueue.main.async { context.coordinator.restorePendingPage() }
         return scroll
     }
 
@@ -199,7 +203,18 @@ struct PageCollectionView: NSViewRepresentable {
             }
         }
 
+        /// Page to show once the view has a real size; position reports wait until then.
+        var pendingPage: Int?
+
+        func restorePendingPage() {
+            guard let page = pendingPage, let view = collection?.enclosingScrollView, view.contentSize.width > 0, view.window != nil else { return }
+            if mode == .reader { applyReaderZoom() }
+            scroll(toPage: page)
+            pendingPage = nil
+        }
+
         @objc func resized(_ note: Notification) {
+            restorePendingPage()
             if mode == .reader, readerZoom != .column(readerLayout.columnLimit) { applyReaderZoom() }
         }
 
@@ -431,7 +446,7 @@ struct PageCollectionView: NSViewRepresentable {
 
         /// Publishes the top visible page at most ~6×/s so SwiftUI isn't re-rendered every frame.
         @objc func scrolled(_ note: Notification) {
-            guard !focusUpdatePending else { return }
+            guard !focusUpdatePending, pendingPage == nil else { return }
             focusUpdatePending = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 guard let self, let collection = self.collection else { return }

@@ -28,6 +28,10 @@ final class ProjectSession {
     @ObservationIgnored private var observers: [PageObserver] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var stateWrite: Task<Void, Never>?
+    /// Detected language per page id, read from the page docs on demand (nil = none detected).
+    @ObservationIgnored private var detectedLanguages: [String: SourceLanguage?] = [:]
+    /// Bumped when a page's detected language may have changed, so the language menu updates.
+    private(set) var detectedLanguagesVersion = 0
     @ObservationIgnored private var folderWatch: DispatchSourceFileSystemObject?
     @ObservationIgnored private var rescan: Task<Void, Never>?
 
@@ -101,6 +105,17 @@ final class ProjectSession {
 
     private static let translateStopped = "Translate Pages"
 
+    /// The language Auto identified for a page when it was translated, if any.
+    func detectedLanguage(ofPage index: Int) -> SourceLanguage? {
+        _ = detectedLanguagesVersion
+        guard index >= 0, index < pages.count else { return nil }
+        let id = pages[index].id
+        if let known = detectedLanguages[id] { return known }
+        let found = translatedIDs.contains(id) ? store.loadPage(id)?.detectedLanguage : nil
+        detectedLanguages[id] = .some(found)
+        return found
+    }
+
     /// Auto language: follow what the last translated page was written in.
     private func adoptDetectedLanguage(_ language: SourceLanguage) {
         guard settings.autoLanguage == true, settings.language != language else { return }
@@ -151,6 +166,8 @@ final class ProjectSession {
         if index < pages.count {
             let id = pages[index].id
             if store.hasPage(id) { translatedIDs.insert(id) } else { translatedIDs.remove(id) }
+            detectedLanguages[id] = nil
+            detectedLanguagesVersion += 1
         }
         liveObservers.forEach { $0.pageChanged(index) }
     }

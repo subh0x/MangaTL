@@ -238,6 +238,8 @@ public struct PageDoc: Codable, Equatable, Sendable {
     public var workingSize: CGSize
     /// Bottom to top.
     public var layers: [ImageLayer]
+    /// The language "Auto" identified for this page when it was translated (nil when chosen by hand).
+    public var detectedLanguage: SourceLanguage?
 
     public init(blocks: [TextBlock] = [], workingSize: CGSize, layers: [ImageLayer] = []) {
         self.blocks = blocks
@@ -245,7 +247,7 @@ public struct PageDoc: Codable, Equatable, Sendable {
         self.layers = layers
     }
 
-    private enum CodingKeys: String, CodingKey { case blocks, workingSize, layers, hasPatch }
+    private enum CodingKeys: String, CodingKey { case blocks, workingSize, layers, hasPatch, detectedLanguage }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -259,6 +261,7 @@ public struct PageDoc: Codable, Equatable, Sendable {
         } else {
             layers = []
         }
+        detectedLanguage = try c.decodeIfPresent(SourceLanguage.self, forKey: .detectedLanguage)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -266,6 +269,7 @@ public struct PageDoc: Codable, Equatable, Sendable {
         try c.encode(blocks, forKey: .blocks)
         try c.encode(workingSize, forKey: .workingSize)
         try c.encode(layers, forKey: .layers)
+        try c.encodeIfPresent(detectedLanguage, forKey: .detectedLanguage)
     }
 }
 

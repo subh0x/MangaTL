@@ -18,6 +18,7 @@ public actor PagePipeline {
                         progress: @Sendable (Stage) -> Void = { _ in },
                         detected: @Sendable (SourceLanguage) -> Void = { _ in }) async throws -> PageDoc {
         var settings = settings
+        var identified: SourceLanguage?
         let page = PixelBuffer(try source.image(at: index, maxPixelSize: Self.workingMaxPixels))
         let size = page.size
 
@@ -31,6 +32,7 @@ public actor PagePipeline {
             if let language = try await LanguageDetector.detect(sample) {
                 settings.language = language
                 settings.rightToLeft = language.defaultRightToLeft
+                identified = language
                 detected(language)
             }
             try Task.checkCancellation()
@@ -67,6 +69,7 @@ public actor PagePipeline {
         // Translating again replaces the text and the clean-up layer; the user's own layers stay.
         let key = source.pageKey(at: index)
         var doc = PageDoc(blocks: blocks, workingSize: size)
+        doc.detectedLanguage = identified
         if let bounds = patch.opaqueBounds() {
             let layer = ImageLayer(name: "Text Clean-up", rect: bounds, kind: .cleanup)
             try store.saveLayer(patch.cropped(to: bounds).makeImage(), page: key, id: layer.id)
