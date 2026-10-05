@@ -25,10 +25,9 @@ struct MangaTLApp: App {
         WindowGroup {
             ContentView()
         }
-        // The compact toolbar is shorter, and macOS 26 rounds a window's corners to match its toolbar,
-        // so the corners come out smaller, closer to other Mac apps.
-        .windowToolbarStyle(.unifiedCompact)
         .commands {
+            // View › Show/Hide Sidebar (⌃⌘S) for the page sidebar.
+            SidebarCommands()
             CommandGroup(after: .saveItem) { ExportMenuItem() }
         }
 
@@ -52,9 +51,8 @@ struct ContentView: View {
     @State private var readerZoom: ReaderZoom = .column(ReaderLayout.defaultColumnWidth)
     @AppStorage("gridThumbnailSize") private var gridSize: Double = Double(ZoomControls.gridDefault)
     @AppStorage("pageSidebarVisible") private var sidebarPreferred = true
-    @AppStorage("pageSidebarWidth") private var sidebarWidth: Double = 200
+    @State private var columns: NavigationSplitViewVisibility = .detailOnly
     @AppStorage("problemsPanelVisible") private var problemsVisible = false
-    @State private var width: CGFloat = 1100
     @AppStorage("editorInspectorVisible") private var inspectorVisible = true
     private let recents = RecentProjects.shared
 
@@ -109,48 +107,37 @@ struct ContentView: View {
             #endif
     }
 
-    /// Content pinned to the full window, status bar at the bottom, one toolbar.
-    /// The page sidebar belongs to the reader and editor; the grid already shows every page.
-    private var sidebarAvailable: Bool { project != nil && (editor != nil || mode == .reader) }
-
-    /// The page sidebar is part of the window (not a floating split-view column), so there is one
-    /// toggle — ours — and it reads as the same surface as the content.
+    /// The page sidebar is a system split-view column, as in Finder: the traffic lights sit in it,
+    /// the title and toolbar sit to its right, and the system provides its one toggle (and ⌃⌘S).
     private var framed: some View {
-        HStack(spacing: 0) {
-            if let project, showsSidebar {
+        NavigationSplitView(columnVisibility: $columns) {
+            if let project {
                 PageSidebar(project: project, position: position, editorPage: editor?.index) { page in
                     if editor != nil {
                         edit(page)
                     } else {
+                        if mode == .grid { mode = .reader }
                         position.page = page
                         position.jump = page
                     }
                 } onRemove: { pages in
                     removePages(pages, from: project)
                 }
-                .frame(width: CGFloat(sidebarWidth))
-                .background(.background.secondary)
-                .overlay(alignment: .trailing) { SidebarResizer(width: $sidebarWidth) }
-                .transition(.move(edge: .leading))
+                .navigationSplitViewColumnWidth(min: 160, ideal: 200, max: 320)
             }
+        } detail: {
             detail
         }
-        .controlSize(.regular)
-        .animation(.snappy(duration: 0.2), value: showsSidebar)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // Remember whether the user wants the sidebar; without a project there is nothing to list.
+        .onChange(of: columns) { _, new in if project != nil { sidebarPreferred = new != .detailOnly } }
+        .onChange(of: project == nil, initial: true) { _, closed in
+            columns = closed || !sidebarPreferred ? .detailOnly : .all
+        }
+        .toolbar(removing: project == nil ? .sidebarToggle : nil)
         .frame(minWidth: 820, minHeight: 560)
         .navigationTitle(project?.title ?? "MangaTL")
         .toolbar { toolbar }
-        // The compact toolbar (smaller window corners on macOS 26) shrinks its items to 24 pt and
-        // sizes menus unevenly; large controls make every item an even 28 pt that still fits the
-        // compact bar. The window content resets to regular above, so only the toolbar is affected.
-        .controlSize(.large)
     }
-
-    static let sidebarMinWindowWidth: CGFloat = 980
-
-    /// The sidebar applies, the user wants it, and the window is wide enough for it.
-    private var showsSidebar: Bool { sidebarAvailable && sidebarPreferred && width >= Self.sidebarMinWindowWidth }
 
     private var detail: some View {
         content
@@ -218,19 +205,8 @@ struct ContentView: View {
         sheet = .export(editor == nil && mode == .grid && !selected.isEmpty ? .pages(selected) : .all)
     }
 
-    private var sidebarToggle: some View {
-        Button {
-            sidebarPreferred.toggle()
-        } label: {
-            Label("Pages", systemImage: "sidebar.left")
-        }
-        .keyboardShortcut("s", modifiers: [.command, .control])
-        .tip("Show or hide the page list", shortcut: "⌃⌘S")
-    }
-
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         if let project, let editor {
-            ToolbarItem(placement: .navigation) { sidebarToggle }
             EditorToolbar(model: editor, pageCount: project.count, inspectorVisible: $inspectorVisible,
                           onClose: closeEditor, onOpenPage: edit) {
                 if editor.dirty { editor.save() }
@@ -242,9 +218,6 @@ struct ContentView: View {
                 TranslateMenu(project: project, position: position, editor: editor) { sheet = $0 }
             }
         } else if let project {
-            ToolbarItem(placement: .navigation) {
-                if sidebarAvailable { sidebarToggle }
-            }
             ToolbarItem(placement: .navigation) {
                 if mode == .reader {
                     Button { mode = .grid } label: { Label("All Pages", systemImage: "square.grid.3x3") }
@@ -429,7 +402,10 @@ struct ContentView: View {
     func showGrid() { mode = .grid }
     func setGridSize(_ size: Double) { gridSize = size }
     func setReaderZoom(_ zoom: ReaderZoom) { readerZoom = zoom }
-    func setSidebar(_ visible: Bool) { sidebarPreferred = visible }
+    func setSidebar(_ visible: Bool) {
+        sidebarPreferred = visible
+        columns = visible ? .all : .detailOnly
+    }
     var problemsShown: Bool { problemsVisible }
     var currentPage: Int { position.page }
     func jump(to page: Int) { position.page = page; position.jump = page }

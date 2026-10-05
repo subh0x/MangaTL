@@ -83,8 +83,6 @@ struct ColorPopover: View {
         }
         .padding(12)
         .frame(width: 252)
-        // Opened from the toolbar, it would inherit the toolbar's large controls.
-        .controlSize(.regular)
         .onAppear { text = color.hex }
         .onChange(of: color) { _, new in
             text = new.hex

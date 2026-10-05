@@ -110,12 +110,18 @@ struct EditorToolbar: ToolbarContent {
         ToolbarItemGroup {
             Button { model.zoomCommand = .zoomOut } label: { Label("Zoom Out", systemImage: "minus.magnifyingglass") }
                 .keyboardShortcut("-").tip("Zoom out", shortcut: "⌘-")
-            Button { model.zoomCommand = .fit } label: { Label("Fit Page", systemImage: "arrow.up.left.and.down.right.magnifyingglass") }
-                .keyboardShortcut("0").tip("Fit page", shortcut: "⌘0")
-            Button { model.zoomCommand = .fitWidth } label: { Label("Fit Width", systemImage: "arrow.left.and.right.square") }
-                .tip("Fit width")
-            Button { model.zoomCommand = .fitHeight } label: { Label("Fit Height", systemImage: "arrow.up.and.down.square") }
-                .tip("Fit height")
+            // One button (fits the page) with width/height in its menu, so the editor toolbar fits
+            // a default-size window at standard button height.
+            Menu {
+                Button("Fit Page") { model.zoomCommand = .fit }.keyboardShortcut("0")
+                Button("Fit Width") { model.zoomCommand = .fitWidth }
+                Button("Fit Height") { model.zoomCommand = .fitHeight }
+            } label: {
+                Label("Fit Page", systemImage: "arrow.up.left.and.down.right.magnifyingglass")
+            } primaryAction: {
+                model.zoomCommand = .fit
+            }
+            .tip("Fit page; click and hold for width or height", shortcut: "⌘0")
             Button { model.zoomCommand = .zoomIn } label: { Label("Zoom In", systemImage: "plus.magnifyingglass") }
                 .keyboardShortcut("=").tip("Zoom in", shortcut: "⌘=")
         }

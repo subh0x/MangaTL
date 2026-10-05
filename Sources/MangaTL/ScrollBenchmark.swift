@@ -125,7 +125,7 @@ enum SmokeRun {
     static func logToolbar(_ name: String) {
         guard let toolbar = NSApp.windows.first(where: { $0.isVisible })?.toolbar else { return }
         let items = toolbar.items.compactMap { item -> String? in
-            guard let view = item.view else { return nil }
+            guard let view = item.view else { return item.itemIdentifier.rawValue.contains("idebar") ? "[system sidebar toggle]" : nil }
             return "\(item.label.isEmpty ? item.itemIdentifier.rawValue.suffix(12).description : item.label)=\(Int(view.frame.height))"
         }
         log("toolbar \(name): \(items.joined(separator: ", "))")
@@ -286,7 +286,11 @@ enum SmokeRun {
         view.edit(0)
         try? await Task.sleep(for: .milliseconds(500))
         guard let editor = view.currentEditor else { log("no editor"); NSApp.terminate(nil); return }
-        logToolbar("editor")
+        for width in [1100.0, 1400] {
+            NSApp.windows.first(where: { $0.isVisible })?.setContentSize(NSSize(width: width, height: 760))
+            try? await Task.sleep(for: .milliseconds(500))
+            logToolbar("editor \(Int(width))")
+        }
         await edit(editor, canvasSnapshot: copy.appendingPathComponent("../mangatl_editor_canvas.jpg").standardized)
         await lasso(editor)
         for fit in [EditorCanvas.ZoomCommand.fitWidth, .fitHeight] {

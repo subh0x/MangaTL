@@ -47,8 +47,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The outline is drawn outside the glyphs. New projects letter dialogue without an outline by default.
 - **Page sidebar redesign:** full-width page thumbnails as in Preview, with the current page ringed and its number in an accent capsule, and a ✓ badge on translated pages. Off-screen thumbnails are released, and the list follows the reader once scrolling settles.
 - **One colour control everywhere:** a swatch-and-hex button that opens preset and recent swatches, a hex field and the system colour panel. It replaces the stretched colour well and the truncated hex field in the inspector, the presets and the toolbar.
-- **Smaller window corners:** the toolbar uses the compact style, which macOS 26 draws with a smaller corner radius.
-- **Page sidebar** is now part of the window, with a single toggle and a draggable edge, instead of a floating split-view column that brought a second toggle.
+- **Finder-style window:** the page sidebar is a system sidebar column, as in Finder, with the traffic lights inside it, the title to its right, and one system toggle (View › Show Sidebar, ⌃⌘S). It is available in every project view. Toolbar buttons are standard height, and the editor's Fit Page button holds Fit Width and Fit Height in its menu.
 - **Tooltips:** each editor tool has its own tooltip, and long tooltips wrap onto two lines at the right height.
 
 ## [0.1.0] - 2026-10-04

@@ -124,34 +124,6 @@ struct PageSidebar: View {
     }
 }
 
-/// The sidebar's right edge: a hairline with a wider invisible handle for dragging its width.
-struct SidebarResizer: View {
-    @Binding var width: Double
-    static let range = 150.0...320.0
-    @State private var start: Double?
-
-    var body: some View {
-        Rectangle()
-            .fill(.separator)
-            .frame(width: 1)
-            .frame(maxHeight: .infinity)
-            .overlay {
-                Color.clear
-                    .frame(width: 7)
-                    .contentShape(Rectangle())
-                    .onHover { inside in if inside { NSCursor.columnResize.push() } else { NSCursor.pop() } }
-                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                        .onChanged { drag in
-                            let base = start ?? width
-                            start = base
-                            width = min(Self.range.upperBound, max(Self.range.lowerBound, base + drag.translation.width))
-                        }
-                        .onEnded { _ in start = nil })
-            }
-            .accessibilityHidden(true)
-    }
-}
-
 /// Dropping a dragged page row before `index` moves it there.
 private struct PageDrop: DropDelegate {
     let index: Int
