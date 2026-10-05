@@ -437,8 +437,10 @@ struct PageCollectionView: NSViewRepresentable {
                 guard let self, let collection = self.collection else { return }
                 self.focusUpdatePending = false
                 let top = collection.enclosingScrollView?.contentView.bounds.minY ?? 0
+                // Jumping to a page leaves the gap above it in view (see scroll(toPage:)); look
+                // past it, or the page before would count as current.
                 let page = self.mode == .reader
-                    ? self.readerLayout.index(atY: top + 1)
+                    ? self.readerLayout.index(atY: top + ReaderLayout.spacing + 1)
                     : collection.indexPathsForVisibleItems().map(\.item).min() ?? 0
                 if self.parent.position.page != page { self.parent.position.page = page }
             }

@@ -121,6 +121,16 @@ enum SmokeRun {
         print("SMOKE window snapshot \(rep.pixelsWide)x\(rep.pixelsHigh) → \(url.lastPathComponent)")
     }
 
+    /// Height of each toolbar item as laid out in the real window.
+    static func logToolbar(_ name: String) {
+        guard let toolbar = NSApp.windows.first(where: { $0.isVisible })?.toolbar else { return }
+        let items = toolbar.items.compactMap { item -> String? in
+            guard let view = item.view else { return nil }
+            return "\(item.label.isEmpty ? item.itemIdentifier.rawValue.suffix(12).description : item.label)=\(Int(view.frame.height))"
+        }
+        log("toolbar \(name): \(items.joined(separator: ", "))")
+    }
+
     static func log(_ s: String) {
         print("SMOKE \(s) (\(Int(MemoryFootprint.megabytes())) MB)")
         fflush(stdout)
@@ -171,6 +181,15 @@ enum SmokeRun {
         project.translate(pages: [0, 1], redo: true)
         await waitForTranslation(project, peak: &peak)
         log("translated \(project.translatedCount) pages, peak \(Int(peak)) MB, problems \(project.problems.isEmpty ? "none" : project.problems.map(\.message).joined(separator: "; "))")
+        logToolbar("reader")
+        // Jumping to a page (as the sidebar does) must leave that page current.
+        var landed: [Int] = []
+        for page in 0..<project.count {
+            view.jump(to: page)
+            try? await Task.sleep(for: .milliseconds(500))
+            landed.append(view.currentPage)
+        }
+        log("sidebar jumps to pages \(Array(0..<project.count)) → current \(landed)")
         log("translated marks: \(project.pages.prefix(2).map { project.translatedIDs.contains($0.id) })")
         await snapshot(width: 1000, name: "reader")
 
@@ -267,6 +286,7 @@ enum SmokeRun {
         view.edit(0)
         try? await Task.sleep(for: .milliseconds(500))
         guard let editor = view.currentEditor else { log("no editor"); NSApp.terminate(nil); return }
+        logToolbar("editor")
         await edit(editor, canvasSnapshot: copy.appendingPathComponent("../mangatl_editor_canvas.jpg").standardized)
         await lasso(editor)
         for fit in [EditorCanvas.ZoomCommand.fitWidth, .fitHeight] {

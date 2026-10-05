@@ -135,11 +135,16 @@ struct ContentView: View {
             }
             detail
         }
+        .controlSize(.regular)
         .animation(.snappy(duration: 0.2), value: showsSidebar)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .frame(minWidth: 820, minHeight: 560)
         .navigationTitle(project?.title ?? "MangaTL")
         .toolbar { toolbar }
+        // The compact toolbar (smaller window corners on macOS 26) shrinks its items to 24 pt and
+        // sizes menus unevenly; large controls make every item an even 28 pt that still fits the
+        // compact bar. The window content resets to regular above, so only the toolbar is affected.
+        .controlSize(.large)
     }
 
     static let sidebarMinWindowWidth: CGFloat = 980
@@ -426,6 +431,8 @@ struct ContentView: View {
     func setReaderZoom(_ zoom: ReaderZoom) { readerZoom = zoom }
     func setSidebar(_ visible: Bool) { sidebarPreferred = visible }
     var problemsShown: Bool { problemsVisible }
+    var currentPage: Int { position.page }
+    func jump(to page: Int) { position.page = page; position.jump = page }
     func removeFromSidebar(_ pages: IndexSet) { if let project { removePages(pages, from: project) } }
     func showProblems(_ visible: Bool) { problemsVisible = visible }
     #endif
