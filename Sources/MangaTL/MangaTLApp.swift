@@ -8,6 +8,7 @@ struct MangaTLApp: App {
     init() {
         Self.ensureSpaceEfficientMalloc()
         Task.detached(priority: .background) { ThumbnailCache.trimDisk() }
+        WindowCommandCenter.shared.installShortcuts()
     }
 
     /// macOS malloc keeps freed model buffers resident (and counted) unless this is set at launch;
@@ -29,6 +30,15 @@ struct MangaTLApp: App {
             // View › Show/Hide Sidebar (⌃⌘S) for the page sidebar.
             SidebarCommands()
             CommandGroup(after: .saveItem) { ExportMenuItem() }
+            TranslateCommands()
+            CommandGroup(after: .sidebar) {
+                Button("Zoom to Fit") { WindowCommandCenter.shared.actions?.zoomToFit() }
+                    .keyboardShortcut("0")
+            }
+            CommandMenu("Page") {
+                Button("Edit Page") { WindowCommandCenter.shared.actions?.editPage() }
+                    .keyboardShortcut("e")
+            }
         }
 
         .defaultSize(width: 1100, height: 800)
@@ -73,7 +83,22 @@ struct ContentView: View {
                 Button("OK") { error = nil }
             } message: { Text($0) }
             .onChange(of: project?.lastTranslated?.token) { reloadEditorIfTranslated() }
-            .focusedSceneValue(\.exportAction, project == nil ? nil : ExportAction { openExport() })
+            // Commands for the menu bar while a project is open (they read state when run).
+            .onChange(of: project.map(ObjectIdentifier.init), initial: true) {
+                WindowCommandCenter.shared.actions = project == nil ? nil : WindowActions(
+                    export: { openExport() },
+                    translatePage: { project?.translatePage(editor?.index ?? position.page, saving: editor) },
+                    translateAll: { if let project { project.translate(pages: Array(0..<project.count)) } },
+                    stop: { project?.cancel() },
+                    editPage: { if project != nil, editor == nil { edit(position.page) } },
+                    // As the status-bar ⌘0: a whole page in the reader, default thumbnails in the grid.
+                    zoomToFit: {
+                        if let editor { editor.zoomCommand = .fit }
+                        else if mode == .reader { readerZoom = .fitHeight }
+                        else { gridSize = Double(ZoomControls.gridDefault) }
+                    },
+                    undoManager: { editor?.undo })
+            }
             .sheet(item: $sheet) { which in
                 if let project {
                     switch which {
@@ -229,8 +254,8 @@ struct ContentView: View {
             ToolbarSpacer(.fixed)
             ToolbarItemGroup {
                 TranslateMenu(project: project, position: position) { sheet = $0 }
+                // ⌘E lives in View › Edit Page: on this button it also caught ⇧⌘E (Export).
                 Button { edit(position.page) } label: { Label("Edit Page", systemImage: "pencil.and.scribble") }
-                    .keyboardShortcut("e")
                     .tip("Edit text, erase and retouch this page (⌘E, or double-click a page in the reader)")
                 if mode == .reader {
                     Toggle(isOn: $showOriginal) { Label("Show Original", systemImage: "character.book.closed") }
@@ -408,27 +433,92 @@ struct ContentView: View {
     }
     var problemsShown: Bool { problemsVisible }
     var currentPage: Int { position.page }
+    var sheetShown: Bool { sheet != nil }
     func jump(to page: Int) { position.page = page; position.jump = page }
     func removeFromSidebar(_ pages: IndexSet) { if let project { removePages(pages, from: project) } }
     func showProblems(_ visible: Bool) { problemsVisible = visible }
     #endif
 }
 
-/// The window's export action, for File › Export… (⇧⌘E).
-struct ExportAction {
-    let run: () -> Void
+/// The open project's commands, for the menu bar. Shortcuts on items inside toolbar menus only
+/// register once that menu has been opened, so the menu bar carries them (always active).
+struct WindowActions {
+    let export: () -> Void
+    let translatePage: () -> Void
+    let translateAll: () -> Void
+    let stop: () -> Void
+    let editPage: () -> Void
+    let zoomToFit: () -> Void
+    /// The editor's undo stack (nil outside the editor: the standard Edit menu handles it).
+    let undoManager: () -> UndoManager?
 }
 
-extension FocusedValues {
-    @Entry var exportAction: ExportAction?
+/// Where the open window registers its commands for the menu bar. The menu items look them up
+/// when chosen rather than observing them: SwiftUI evaluated the items' enabled state once, at
+/// launch (no project yet), and only refreshed it when the menu was opened, so until then their
+/// shortcuts didn't fire. With no project open they do nothing.
+@MainActor final class WindowCommandCenter {
+    static let shared = WindowCommandCenter()
+    var actions: WindowActions?
+    private var monitor: Any?
+
+    /// The app's own shortcuts, matched exactly (key and modifiers). SwiftUI's menu matching ignored
+    /// Shift — plain ⌘E ran Export (⇧⌘E), and a ⌘E button caught ⇧⌘E — so these are handled here
+    /// first; the menu items only show them.
+    private static let shortcuts: [(key: String, modifiers: NSEvent.ModifierFlags, run: (WindowActions) -> Void)] = [
+        ("e", [.command], { $0.editPage() }),
+        ("e", [.command, .shift], { $0.export() }),
+        ("t", [.command], { $0.translatePage() }),
+        ("t", [.command, .shift], { $0.translateAll() }),
+        (".", [.command], { $0.stop() }),
+        ("0", [.command], { $0.zoomToFit() }),
+    ]
+
+    func installShortcuts() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let handled = MainActor.assumeIsolated { WindowCommandCenter.shared.handle(event) }
+            return handled ? nil : event
+        }
+    }
+
+    private func handle(_ event: NSEvent) -> Bool {
+        // Only for the project window itself: not in sheets, panels or popovers.
+        guard let actions, let window = event.window ?? NSApp.keyWindow, window.attachedSheet == nil, window.sheetParent == nil,
+              !(window is NSPanel), window.contentView != nil else { return false }
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        // Undo/redo go to the editor's own stack (Edit › Undo targets the window's, which is empty),
+        // except while typing in a text field, which undoes its own typing.
+        if event.charactersIgnoringModifiers?.lowercased() == "z", modifiers == [.command] || modifiers == [.command, .shift],
+           let undo = actions.undoManager(), !(window.firstResponder is NSTextView) {
+            if modifiers == [.command] { if undo.canUndo { undo.undo() } } else if undo.canRedo { undo.redo() }
+            return true
+        }
+        guard let key = event.charactersIgnoringModifiers?.lowercased(),
+              let match = Self.shortcuts.first(where: { $0.key == key && $0.modifiers == modifiers }) else { return false }
+        match.run(actions)
+        return true
+    }
 }
 
 struct ExportMenuItem: View {
-    @FocusedValue(\.exportAction) private var export
-
     var body: some View {
-        Button("Export…") { export?.run() }
+        Button("Export…") { WindowCommandCenter.shared.actions?.export() }
             .keyboardShortcut("e", modifiers: [.command, .shift])
-            .disabled(export == nil)
+    }
+}
+
+/// Translate in the menu bar (also offered from the toolbar's Translate menu).
+struct TranslateCommands: Commands {
+    var body: some Commands {
+        CommandMenu("Translate") {
+            Button("Translate This Page") { WindowCommandCenter.shared.actions?.translatePage() }
+                .keyboardShortcut("t")
+            Button("Translate All Untranslated Pages") { WindowCommandCenter.shared.actions?.translateAll() }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+            Divider()
+            Button("Stop Translating") { WindowCommandCenter.shared.actions?.stop() }
+                .keyboardShortcut(".")
+        }
     }
 }

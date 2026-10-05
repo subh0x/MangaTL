@@ -113,7 +113,7 @@ struct EditorToolbar: ToolbarContent {
             // One button (fits the page) with width/height in its menu, so the editor toolbar fits
             // a default-size window at standard button height.
             Menu {
-                Button("Fit Page") { model.zoomCommand = .fit }.keyboardShortcut("0")
+                Button("Fit Page") { model.zoomCommand = .fit }
                 Button("Fit Width") { model.zoomCommand = .fitWidth }
                 Button("Fit Height") { model.zoomCommand = .fitHeight }
             } label: {

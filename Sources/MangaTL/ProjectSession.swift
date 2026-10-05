@@ -60,6 +60,12 @@ final class ProjectSession {
         translate(keys: indices.filter { $0 < pages.count && (redo || !isTranslated($0)) }.map { pages[$0].id })
     }
 
+    /// Translates one page again; an open editor saves its edits first (its own layers are kept).
+    func translatePage(_ index: Int, saving editor: EditorModel?) {
+        if let editor, editor.dirty { editor.save() }
+        translate(pages: [index], redo: true)
+    }
+
     private func translate(keys todo: [String]) {
         cancel()
         guard !todo.isEmpty else { return }

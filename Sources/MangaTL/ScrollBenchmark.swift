@@ -121,6 +121,32 @@ enum SmokeRun {
         print("SMOKE window snapshot \(rep.pixelsWide)x\(rep.pixelsHigh) → \(url.lastPathComponent)")
     }
 
+    /// US-layout virtual key codes for the keys the smoke run presses.
+    static let keyCodes: [String: UInt16] = ["e": 14, "t": 17, "0": 29, ".": 47, "z": 6]
+
+    /// Makes the app active with its window key (the smoke run is launched from a terminal, which
+    /// can keep focus), then presses the key.
+    static func pressSettled(_ key: String, _ modifiers: NSEvent.ModifierFlags = .command) async {
+        NSApp.activate()
+        NSApp.windows.first(where: { $0.isVisible })?.makeKeyAndOrderFront(nil)
+        for _ in 0..<20 where NSApp.keyWindow == nil { try? await Task.sleep(for: .milliseconds(50)) }
+        press(key, modifiers)
+    }
+
+    /// Queues a key press as the keyboard would deliver it (Shift gives the capital letter), so it
+    /// goes through event monitors, the window and the menu bar like a real one.
+    static func press(_ key: String, _ modifiers: NSEvent.ModifierFlags = .command) {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
+        let chars = modifiers.contains(.shift) ? key.uppercased() : key
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                                            isARepeat: false, keyCode: keyCodes[key.lowercased()] ?? 0) {
+                NSApp.postEvent(event, atStart: false)
+            }
+        }
+    }
+
     /// The page actually at the top of the reader's scroll view (not the published position).
     static func readerShownPage() -> Int? {
         guard let collection = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: NSCollectionView.self) }).first,
@@ -197,6 +223,41 @@ enum SmokeRun {
             try? await Task.sleep(for: .milliseconds(500))
             landed.append(view.currentPage)
         }
+        // Shortcuts work without ever opening the toolbar's Translate menu.
+        NSApp.activate()
+        NSApp.windows.first(where: { $0.isVisible })?.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(500))
+        let translateMenu = NSApp.mainMenu?.items.first { $0.title == "Translate" }?.submenu
+        translateMenu?.update()
+        NSApp.activate()
+        NSApp.windows.first(where: { $0.isVisible })?.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .milliseconds(500))
+        log("menu bar Translate: \(translateMenu?.items.map { "\($0.title)[\($0.keyEquivalent)]\($0.isEnabled ? "" : " disabled")" } ?? ["missing"]), active \(NSApp.isActive), key window \(NSApp.keyWindow != nil)")
+        await pressSettled("e")
+        try? await Task.sleep(for: .milliseconds(600))
+        log("shortcuts: ⌘E opened the editor \(view.currentEditor != nil)")
+        if view.currentEditor != nil { view.closeEditor(); try? await Task.sleep(for: .milliseconds(800)) }
+        await pressSettled("e", [.command, .shift])
+        var opened = false
+        for _ in 0..<30 where !opened { try? await Task.sleep(for: .milliseconds(50)); opened = view.sheetShown }
+        log("shortcuts: ⇧⌘E opened export sheet \(opened), opened the editor instead \(view.currentEditor != nil)")
+        if view.currentEditor != nil { view.closeEditor(); try? await Task.sleep(for: .milliseconds(800)) }
+        view.show(nil)
+        try? await Task.sleep(for: .milliseconds(800))
+        await pressSettled("t")
+        try? await Task.sleep(for: .milliseconds(300))
+        let started = project.isTranslating
+        await pressSettled(".")
+        try? await Task.sleep(for: .milliseconds(300))
+        log("shortcuts: ⌘T started translation \(started), ⌘. stopped it \(!project.isTranslating)")
+        await pressSettled("t", [.command, .shift])
+        var startedAll = false
+        for _ in 0..<30 where !startedAll { try? await Task.sleep(for: .milliseconds(50)); startedAll = project.isTranslating }
+        let queued = project.progress?.total ?? 0
+        project.cancel()
+        while project.isTranslating { try? await Task.sleep(for: .milliseconds(50)) }
+        log("shortcuts: ⇧⌘T started translating all \(startedAll), queued \(queued) pages (untranslated: \(project.count - project.translatedCount))")
+
         // Auto names a language only for pages it has identified.
         project.settings.autoLanguage = true
         let languageBefore = project.detectedLanguage(ofPage: 1)
@@ -315,6 +376,23 @@ enum SmokeRun {
         }
         await edit(editor, canvasSnapshot: copy.appendingPathComponent("../mangatl_editor_canvas.jpg").standardized)
         await lasso(editor)
+        if let canvas = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: CanvasDocumentView.self) }).first,
+           let scroll = canvas.enclosingScrollView {
+            scroll.magnification = 2
+            await pressSettled("0")
+            let blocks = editor.doc.blocks.count
+            editor.addBlock()
+            await pressSettled("z")
+            try? await Task.sleep(for: .milliseconds(400))
+            let afterUndo = editor.doc.blocks.count
+            await pressSettled("z", [.command, .shift])
+            try? await Task.sleep(for: .milliseconds(400))
+            log("shortcuts: add box \(blocks) → \(blocks + 1), ⌘Z → \(afterUndo), ⇧⌘Z → \(editor.doc.blocks.count)")
+            editor.undo.undo()
+            try? await Task.sleep(for: .milliseconds(400))
+            let target = min(scroll.contentSize.width / canvas.frame.width, scroll.contentSize.height / canvas.frame.height) * 0.98
+            log(String(format: "shortcuts: ⌘0 in editor → magnification %.3f (fit %.3f)", scroll.magnification, target))
+        }
         for fit in [EditorCanvas.ZoomCommand.fitWidth, .fitHeight] {
             editor.zoomCommand = fit
             try? await Task.sleep(for: .milliseconds(500))

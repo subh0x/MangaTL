@@ -107,12 +107,7 @@ struct TranslateMenu: View {
     }
 
     private func translateCurrentPage() {
-        if let editor {
-            if editor.dirty { editor.save() }
-            project.translate(pages: [editor.index], redo: true)
-        } else {
-            project.translate(pages: [position.page], redo: true)
-        }
+        project.translatePage(editor?.index ?? position.page, saving: editor)
     }
 }
 

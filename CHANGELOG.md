@@ -43,6 +43,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Pages removed from a project came back on the next folder rescan or reopen. Removed files are now remembered, and Add Images brings them back.
 - Adding an image that is already in the project folder no longer makes a renamed copy of it.
 - The brush-size control in the toolbar had no left padding.
+- **Keyboard shortcuts:**
+  - ⌘T, ⇧⌘T and ⌘. lived in the toolbar's Translate menu and ⌘0 in the editor's Fit menu, so they only worked after that menu had been opened.
+  - ⇧⌘E (Export) and ⌘E (Edit Page) could trigger each other.
+  - ⌘Z and ⇧⌘Z in the editor did nothing.
+  - These shortcuts are now matched exactly by the app and listed in the menu bar (Translate menu, View › Zoom to Fit, Page › Edit Page). Undo and redo go to the editor, except while typing in a text field.
 - Closing the editor showed page 1 although the page number said otherwise. The reader is now scrolled to the edited page once it has its size.
 
 ### Changed
