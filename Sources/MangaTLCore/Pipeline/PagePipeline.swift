@@ -8,16 +8,34 @@ public actor PagePipeline {
     /// Longest side the pipeline works at; also the patch layer's resolution.
     public static let workingMaxPixels = 2400
 
-    public enum Stage: String, Sendable { case detecting = "Finding text", reading = "Reading", translating = "Translating", erasing = "Erasing" }
+    public enum Stage: String, Sendable {
+        case detecting = "Finding text", identifying = "Identifying language", reading = "Reading", translating = "Translating", erasing = "Erasing"
+    }
 
+    /// With `settings.autoLanguage`, the page's language is identified from its text first and used
+    /// for reading, reading order and translation; `detected` receives it.
     public func process(_ source: any PageSource, index: Int, settings: ProjectSettings, store: ProjectStore,
-                        progress: @Sendable (Stage) -> Void = { _ in }) async throws -> PageDoc {
+                        progress: @Sendable (Stage) -> Void = { _ in },
+                        detected: @Sendable (SourceLanguage) -> Void = { _ in }) async throws -> PageDoc {
+        var settings = settings
         let page = PixelBuffer(try source.image(at: index, maxPixelSize: Self.workingMaxPixels))
         let size = page.size
 
         progress(.detecting)
-        let regions = PageLayout.regions(from: try TextDetector.detect(page), rightToLeft: settings.rightToLeft)
+        let detections = try TextDetector.detect(page)
         try Task.checkCancellation()
+        if settings.autoLanguage == true {
+            progress(.identifying)
+            let sample = PageLayout.regions(from: detections, rightToLeft: settings.rightToLeft)
+                .map { page.cropped(to: $0.text.insetBy(dx: -4, dy: -4)) }
+            if let language = try await LanguageDetector.detect(sample) {
+                settings.language = language
+                settings.rightToLeft = language.defaultRightToLeft
+                detected(language)
+            }
+            try Task.checkCancellation()
+        }
+        let regions = PageLayout.regions(from: detections, rightToLeft: settings.rightToLeft)
 
         progress(.reading)
         let crops = regions.map { page.cropped(to: $0.text.insetBy(dx: -4, dy: -4)) }

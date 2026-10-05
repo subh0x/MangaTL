@@ -70,6 +70,8 @@ final class ProjectSession {
                         Task { @MainActor in
                             if let p = self.progress, p.page == index { self.progress = (p.done, p.total, index, stage.rawValue) }
                         }
+                    } detected: { language in
+                        Task { @MainActor in self.adoptDetectedLanguage(language) }
                     }
                     lastTranslated = (key, (lastTranslated?.token ?? 0) + 1)
                     pageChanged(index)
@@ -98,6 +100,13 @@ final class ProjectSession {
     }
 
     private static let translateStopped = "Translate Pages"
+
+    /// Auto language: follow what the last translated page was written in.
+    private func adoptDetectedLanguage(_ language: SourceLanguage) {
+        guard settings.autoLanguage == true, settings.language != language else { return }
+        settings.language = language
+        settings.rightToLeft = language.defaultRightToLeft
+    }
 
     /// Pages selected in the grid (for "Export Selected").
     var gridSelection: [Int] = []

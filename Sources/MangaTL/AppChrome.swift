@@ -8,23 +8,32 @@ struct LanguageMenu: View {
 
     var body: some View {
         Menu {
-            Picker("Source language", selection: Binding(
-                get: { project.settings.language },
+            // nil = Auto: identified from each page's text when it is translated.
+            Picker("Source language", selection: Binding<SourceLanguage?>(
+                get: { project.settings.autoLanguage == true ? nil : project.settings.language },
                 set: { language in
-                    project.settings.language = language
-                    project.settings.rightToLeft = language.defaultRightToLeft
+                    project.settings.autoLanguage = language == nil ? true : nil
+                    if let language {
+                        project.settings.language = language
+                        project.settings.rightToLeft = language.defaultRightToLeft
+                    }
                 }
             )) {
-                ForEach(SourceLanguage.allCases) { Text($0.displayName).tag($0) }
+                Text("Auto").tag(SourceLanguage?.none)
+                Divider()
+                ForEach(SourceLanguage.allCases) { Text($0.displayName).tag(SourceLanguage?.some($0)) }
             }
             .pickerStyle(.inline)
             Toggle("Read right to left", isOn: $project.settings.rightToLeft)
         } label: {
-            Label(project.settings.language.displayName, systemImage: "globe")
+            Label(project.settings.autoLanguage == true ? "Auto · \(project.settings.language.displayName)" : project.settings.language.displayName,
+                  systemImage: "globe")
                 .labelStyle(.titleAndIcon)
                 .lineLimit(1)
         }
-        .tip("Language the manga is written in")
+        .tip(project.settings.autoLanguage == true
+             ? "Auto: each page's language is identified when it is translated (last found: \(project.settings.language.displayName))"
+             : "Language the manga is written in")
     }
 }
 

@@ -39,7 +39,7 @@ and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Changes are listed in [CHANGEL
   - Right-click for Move to Start/End, Translate, Edit, Show in Finder, and Remove from Project (which keeps the file).
   - In the page sidebar, ⌘/⇧-click selects several pages; Delete (or right-click › Delete) takes them out of the project and keeps the files.
 - **Translate.**
-  - Pick the **source language** in the toolbar.
+  - Pick the **source language** in the toolbar, or **Auto** to identify it from each page's text when the page is translated.
   - ⌘T translates the current page, also from inside the editor, where your own retouch layers are kept. ⇧⌘T translates every untranslated page.
   - In the reader, ⌥⌘O shows the original pages.
   - **Problems panel** (⇧⌘M, or the counts in the status bar): failed translations, exports and edits, plus pages where no text was found, each with **Retry** and **Go to Page**. It opens by itself when something fails.

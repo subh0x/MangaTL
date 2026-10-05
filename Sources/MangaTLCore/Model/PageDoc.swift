@@ -27,6 +27,9 @@ public enum SourceLanguage: String, Codable, CaseIterable, Sendable, Identifiabl
 /// Per-book settings, stored as `project.json` next to the page docs.
 public struct ProjectSettings: Codable, Equatable, Sendable {
     public var language: SourceLanguage
+    /// "Auto": each page's language is identified when it is translated, and `language` follows
+    /// the last one found (so the editor and the next pages use it).
+    public var autoLanguage: Bool?
     public var rightToLeft: Bool
     /// The project's base lettering style (dialogue).
     public var style: TextStyle
