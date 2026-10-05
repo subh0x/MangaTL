@@ -55,11 +55,11 @@ struct EditorToolbar: ToolbarContent {
             Button { onOpenPage(model.index - 1) } label: { Label("Previous Page", systemImage: "chevron.left") }
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(model.index == 0)
-                .tip("Previous page, saving this one", shortcut: "⌘[")
+                .tip("Previous page, saving this one", shortcut: "← or ⌘[")
             Button { onOpenPage(model.index + 1) } label: { Label("Next Page", systemImage: "chevron.right") }
                 .keyboardShortcut("]", modifiers: .command)
                 .disabled(model.index + 1 >= pageCount)
-                .tip("Next page, saving this one", shortcut: "⌘]")
+                .tip("Next page, saving this one", shortcut: "→ or ⌘]")
         }
         ToolbarItemGroup {
             // One button per tool (not a segmented picker) so each gets its own tooltip.

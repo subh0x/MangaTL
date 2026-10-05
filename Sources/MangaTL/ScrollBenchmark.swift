@@ -122,7 +122,7 @@ enum SmokeRun {
     }
 
     /// US-layout virtual key codes for the keys the smoke run presses.
-    static let keyCodes: [String: UInt16] = ["e": 14, "t": 17, "0": 29, ".": 47, "z": 6]
+    static let keyCodes: [String: UInt16] = ["e": 14, "t": 17, "0": 29, ".": 47, "z": 6, "left": 123, "right": 124, "down": 125, "up": 126]
 
     /// Makes the app active with its window key (the smoke run is launched from a terminal, which
     /// can keep focus), then presses the key.
@@ -137,7 +137,8 @@ enum SmokeRun {
     /// goes through event monitors, the window and the menu bar like a real one.
     static func press(_ key: String, _ modifiers: NSEvent.ModifierFlags = .command) {
         guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
-        let chars = modifiers.contains(.shift) ? key.uppercased() : key
+        let arrows: [String: NSEvent.SpecialKey] = ["left": .leftArrow, "right": .rightArrow, "up": .upArrow, "down": .downArrow]
+        let chars = arrows[key].map { String(Character(UnicodeScalar($0.rawValue)!)) } ?? (modifiers.contains(.shift) ? key.uppercased() : key)
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
                                             windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
@@ -272,6 +273,12 @@ enum SmokeRun {
         view.closeEditor()
         try? await Task.sleep(for: .milliseconds(1200))
         log("close editor on page 3 → current page \(view.currentPage + 1), showing page \(readerShownPage().map { "\($0 + 1)" } ?? "?")")
+        await pressSettled("right", [])
+        try? await Task.sleep(for: .milliseconds(800))
+        let afterRight = view.currentPage
+        await pressSettled("down", [])
+        try? await Task.sleep(for: .milliseconds(800))
+        log("shortcuts: reader → from page 3 to \(afterRight + 1); ↓ scrolls (page \(view.currentPage + 1), not a jump)")
         log("sidebar jumps to pages \(Array(0..<project.count)) → current \(landed)")
         log("translated marks: \(project.pages.prefix(2).map { project.translatedIDs.contains($0.id) })")
         await snapshot(width: 1000, name: "reader")
@@ -389,6 +396,16 @@ enum SmokeRun {
             try? await Task.sleep(for: .milliseconds(400))
             log("shortcuts: add box \(blocks) → \(blocks + 1), ⌘Z → \(afterUndo), ⇧⌘Z → \(editor.doc.blocks.count)")
             editor.undo.undo()
+            // Arrow keys move between pages in the editor.
+            var visited = [view.currentEditor?.index ?? -1]
+            for key in ["right", "right", "left", "down"] {
+                await pressSettled(key, [])
+                try? await Task.sleep(for: .milliseconds(700))
+                visited.append(view.currentEditor?.index ?? -1)
+            }
+            log("shortcuts: editor arrows → → ← ↓ visit pages \(visited.map { $0 + 1 })")
+            view.edit(visited[0])
+            try? await Task.sleep(for: .milliseconds(500))
             try? await Task.sleep(for: .milliseconds(400))
             let target = min(scroll.contentSize.width / canvas.frame.width, scroll.contentSize.height / canvas.frame.height) * 0.98
             log(String(format: "shortcuts: ⌘0 in editor → magnification %.3f (fit %.3f)", scroll.magnification, target))

@@ -97,7 +97,20 @@ struct ContentView: View {
                         else if mode == .reader { readerZoom = .fitHeight }
                         else { gridSize = Double(ZoomControls.gridDefault) }
                     },
-                    undoManager: { editor?.undo })
+                    undoManager: { editor?.undo },
+                    stepPage: { delta, vertical in
+                        guard let project else { return false }
+                        if let editor {
+                            let target = editor.index + delta
+                            if target >= 0, target < project.count { edit(target) }
+                            return true
+                        }
+                        guard mode == .reader, !vertical else { return false }
+                        let target = min(max(position.page + delta, 0), project.count - 1)
+                        position.page = target
+                        position.jump = target
+                        return true
+                    })
             }
             .sheet(item: $sheet) { which in
                 if let project {
@@ -451,6 +464,9 @@ struct WindowActions {
     let zoomToFit: () -> Void
     /// The editor's undo stack (nil outside the editor: the standard Edit menu handles it).
     let undoManager: () -> UndoManager?
+    /// Arrow keys: moves `delta` pages; returns false to leave the key to the view (e.g. ↑/↓
+    /// scrolling the reader, arrows in the grid).
+    let stepPage: (_ delta: Int, _ vertical: Bool) -> Bool
 }
 
 /// Where the open window registers its commands for the menu bar. The menu items look them up
@@ -493,6 +509,17 @@ struct WindowActions {
            let undo = actions.undoManager(), !(window.firstResponder is NSTextView) {
             if modifiers == [.command] { if undo.canUndo { undo.undo() } } else if undo.canRedo { undo.redo() }
             return true
+        }
+        // Arrows: previous/next page (editor: all four; reader: ← →). Not while typing.
+        if modifiers.isEmpty, !(window.firstResponder is NSTextView),
+           let step: (Int, Bool) = switch event.specialKey {
+               case .leftArrow?: (-1, false)
+               case .rightArrow?: (1, false)
+               case .upArrow?: (-1, true)
+               case .downArrow?: (1, true)
+               default: nil
+           } {
+            return actions.stepPage(step.0, step.1)
         }
         guard let key = event.charactersIgnoringModifiers?.lowercased(),
               let match = Self.shortcuts.first(where: { $0.key == key && $0.modifiers == modifiers }) else { return false }

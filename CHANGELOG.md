@@ -26,6 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **Format:** JPEG, PNG or HEIC with a quality setting, at original, working or custom size.
   - **Package:** a folder with a name pattern, a CBZ or a PDF.
   - The last choices are remembered per project.
+- **Arrow keys move between pages:** in the editor, ← → (and ↑ ↓) go to the previous or next page and save as you go. In the reader, ← → jump a page while ↑ ↓ still scroll. Arrows stay in a text field while you type.
 - **Auto source language:** choose Auto in the language menu to identify each page's language from the script and words of most of its text when it is translated, then read and translate it in that language. The menu shows just "Auto" until the page you're on has been translated, then names the language found for that page (for example "Auto · Japanese"). The language is saved with the page, and the editor uses it.
 - **Delete pages from the sidebar:** ⌘/⇧-click to select several pages, then press Delete or use the right-click menu. The image files stay in the folder.
 - **Lasso tool** (L) in the editor: draw around text the detector missed to read, translate and erase it in one undoable step.
