@@ -93,8 +93,8 @@ struct PresetsView: View {
             LabeledContent("Space inside") { percent(field(\.padding), 0...0.3) }
         }
         Section("Colour") {
-            LabeledContent("Text") { ColorField(color: field(\.color)) }
-            LabeledContent("Outline") { ColorField(color: field(\.strokeColor)) }
+            LabeledContent("Text") { ColorField(color: field(\.color), help: "Text colour") }
+            LabeledContent("Outline") { ColorField(color: field(\.strokeColor), help: "Outline colour") }
             LabeledContent("Outline width") {
                 HStack {
                     Slider(value: field(\.strokeWidth), in: 0...12)

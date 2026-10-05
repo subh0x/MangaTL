@@ -25,6 +25,9 @@ struct MangaTLApp: App {
         WindowGroup {
             ContentView()
         }
+        // The compact toolbar is shorter, and macOS 26 rounds a window's corners to match its toolbar,
+        // so the corners come out smaller, closer to other Mac apps.
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(after: .saveItem) { ExportMenuItem() }
         }

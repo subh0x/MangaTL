@@ -95,7 +95,7 @@ struct EditorToolbar: ToolbarContent {
                     .toggleStyle(.button)
                     .tip("Auto: use the colour under the start of each stroke")
                     // Picking a colour turns Auto off.
-                    ColorField(color: Binding(get: { model.brushColor ?? .white }, set: { model.brushColor = $0 }), style: .compact)
+                    ColorField(color: Binding(get: { model.brushColor ?? .white }, set: { model.brushColor = $0 }), showsHex: false, help: "Brush colour")
                         .opacity(model.brushColor == nil ? 0.45 : 1)
                 }
             }
@@ -324,8 +324,8 @@ struct Inspector: View {
                     .tip("Empty space kept between the text and the balloon edge")
                 }
                 Section("Colour") {
-                    LabeledContent("Text") { ColorField(color: styleBinding(\.color, "Text Colour", first)) }
-                    LabeledContent("Outline") { ColorField(color: styleBinding(\.strokeColor, "Outline Colour", first)) }
+                    LabeledContent("Text") { ColorField(color: styleBinding(\.color, "Text Colour", first), help: "Text colour") }
+                    LabeledContent("Outline") { ColorField(color: styleBinding(\.strokeColor, "Outline Colour", first), help: "Outline colour") }
                     LabeledContent("Outline width") {
                         Slider(value: styleBinding(\.strokeWidth, "Outline Width", first), in: 0...12)
                     }

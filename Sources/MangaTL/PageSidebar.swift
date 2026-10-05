@@ -25,18 +25,20 @@ struct PageSidebar: View {
     @State private var anchor: Int?
     @State private var confirming: IndexSet?
     @FocusState private var focused: Bool
+    /// Thumbnails wider than ~200 pt (a widened sidebar) use the sharper 640 px tier.
+    @State private var large = false
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 14) {
                     ForEach(project.pages.indices, id: \.self) { index in
                         PageSidebarRow(project: project, index: index, pageID: project.pages[index].id, isCurrent: index == current,
-                                       isSelected: selection.contains(project.pages[index].id))
+                                       isSelected: selection.contains(project.pages[index].id), large: large)
                             .id(index)
                             .overlay(alignment: .top) {
                                 if dropTarget == index {
-                                    Rectangle().fill(Color.accentColor).frame(height: 2).offset(y: -2)
+                                    Capsule().fill(Color.accentColor).frame(height: 3).offset(y: -9)
                                 }
                             }
                             .contentShape(Rectangle())
@@ -56,9 +58,10 @@ struct PageSidebar: View {
                             .onDrop(of: [.text], delegate: PageDrop(index: index, project: project, target: $dropTarget))
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
             }
+            .onGeometryChange(for: Bool.self) { $0.size.width - 24 > 200 } action: { large = $0 }
             .focusable()
             .focused($focused)
             .focusEffectDisabled()
@@ -69,7 +72,13 @@ struct PageSidebar: View {
                 return .handled
             }
             .onAppear { proxy.scrollTo(current, anchor: .center) }
-            .onChange(of: current) { _, page in proxy.scrollTo(page) }
+            // Follow the reader once it settles: tracking every page of a fast scroll would create
+            // (and decode) every row on the way.
+            .task(id: current) {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo(current)
+            }
             .confirmationDialog(confirmTitle, isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })) {
                 Button("Delete", role: .destructive) {
                     if let pages = confirming { onRemove(pages) }
@@ -118,7 +127,7 @@ struct PageSidebar: View {
 /// The sidebar's right edge: a hairline with a wider invisible handle for dragging its width.
 struct SidebarResizer: View {
     @Binding var width: Double
-    static let range = 160.0...260.0
+    static let range = 150.0...320.0
     @State private var start: Double?
 
     var body: some View {
@@ -172,40 +181,58 @@ private struct PageSidebarRow: View {
     let pageID: String
     let isCurrent: Bool
     let isSelected: Bool
+    let large: Bool
     @State private var thumbnail: CGImage?
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                if let thumbnail {
-                    Image(decorative: thumbnail, scale: 1).resizable().aspectRatio(contentMode: .fit)
-                } else {
-                    Rectangle().fill(.quaternary)
+        VStack(spacing: 6) {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if let thumbnail {
+                        Image(decorative: thumbnail, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                    } else {
+                        Rectangle().fill(.quaternary).aspectRatio(0.7, contentMode: .fit)
+                    }
                 }
-            }
-            .frame(width: 44, height: 62)
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(index + 1)").font(.body.monospacedDigit().weight(.medium))
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
                 // Read in body so the mark appears as soon as the page is translated or saved.
                 if project.translatedIDs.contains(pageID) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                    Image(systemName: "checkmark.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .green)
+                        .font(.system(size: 15))
+                        .shadow(color: .black.opacity(0.3), radius: 1)
+                        .padding(5)
                         .accessibilityLabel("Translated")
                 }
             }
-            Spacer(minLength: 0)
+            .padding(4)
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(isCurrent ? 1 : isSelected ? 0.5 : 0), lineWidth: isCurrent ? 3 : 2)
+            }
+            .background(hovering && !isCurrent ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            Text("\(index + 1)")
+                .font(.callout.monospacedDigit().weight(.medium))
+                .foregroundStyle(isCurrent ? .white : .secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 1)
+                .background(isCurrent ? Color.accentColor : .clear, in: Capsule())
         }
-        .padding(.vertical, 3)
-        .padding(.horizontal, 6)
-        .background(isCurrent ? Color.accentColor.opacity(0.25) : isSelected ? Color.accentColor.opacity(0.14) : .clear,
-                    in: RoundedRectangle(cornerRadius: 6))
-        .task(id: pageID) {
+        .frame(maxWidth: .infinity)
+        .onHover { hovering = $0 }
+        // Lazy stacks keep rows they've created; drop the image when scrolled away (it is cached).
+        .onDisappear { thumbnail = nil }
+        .task(id: "\(pageID)-\(large)") {
             let cache = project.cache
-            let index = index
-            if let hit = cache.cached(index) {
+            let (index, large) = (index, large)
+            if let hit = cache.cached(index, large: large) {
                 thumbnail = hit
             } else {
-                thumbnail = await Task.detached(priority: .utility) { try? cache.load(index) }.value
+                thumbnail = await Task.detached(priority: .utility) { try? cache.load(index, large: large) }.value
             }
         }
     }

@@ -2,6 +2,7 @@
 import AppKit
 import MangaTLCore
 import QuartzCore
+import SwiftUI
 
 /// Debug-only scroll benchmark, enabled with `MANGATL_BENCH=<project path>`.
 /// Drives the scroll view once per display frame (grid to the bottom, then 300 reader pages),
@@ -173,6 +174,19 @@ enum SmokeRun {
         log("translated marks: \(project.pages.prefix(2).map { project.translatedIDs.contains($0.id) })")
         await snapshot(width: 1000, name: "reader")
 
+        // The page sidebar on its own (window snapshots don't capture it).
+        let sidebarHost = NSHostingView(rootView: PageSidebar(project: project, position: ReadingPosition(), editorPage: nil, onSelect: { _ in }, onRemove: { _ in })
+            .frame(width: 200, height: 640).background(Color(white: 0.16)).environment(\.colorScheme, .dark))
+        let offscreen = NSWindow(contentRect: CGRect(x: -4000, y: 0, width: 200, height: 640), styleMask: .borderless, backing: .buffered, defer: false)
+        offscreen.contentView = sidebarHost
+        offscreen.orderFrontRegardless()
+        try? await Task.sleep(for: .seconds(1.5))
+        if let rep = sidebarHost.bitmapImageRepForCachingDisplay(in: sidebarHost.bounds) {
+            sidebarHost.cacheDisplay(in: sidebarHost.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_sidebar.png"))
+        }
+        offscreen.orderOut(nil)
+
         // An image dropped into the folder from outside joins the project in name order.
         let first = project.pages[0].file
         let outside = copy.appendingPathComponent((first as NSString).deletingPathExtension + "a." + (first as NSString).pathExtension)
@@ -282,6 +296,27 @@ enum SmokeRun {
             reloaded.selection = Set(reloaded.doc.blocks.prefix(1).map(\.id))
         }
         for width in [820.0, 1000, 1400] { await snapshot(width: width, name: "editor") }
+
+        // The colour control in a form, and its popover, rendered on their own.
+        RecentColors.shared.use(RGBA(hex: "#1E90FF")!)
+        let samples: [(String, AnyView)] = [
+            ("colour_form", AnyView(Form {
+                Section("Colour") {
+                    LabeledContent("Text") { ColorField(color: .constant(.black)) }
+                    LabeledContent("Outline") { ColorField(color: .constant(.white)) }
+                }
+            }.formStyle(.grouped).frame(width: 320, height: 150))),
+            ("colour_popover", AnyView(ColorPopover(color: .constant(RGBA(hex: "#1E90FF")!)).background(.background))),
+        ]
+        for (name, view) in samples {
+            let host = NSHostingView(rootView: view.environment(\.colorScheme, .dark))
+            host.frame = CGRect(origin: .zero, size: host.fittingSize)
+            host.layoutSubtreeIfNeeded()
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mangatl_\(name).png"))
+            }
+        }
 
         // Deleting pages from the sidebar while editing: the editor stays on its page.
         if let editing = view.currentEditor {
