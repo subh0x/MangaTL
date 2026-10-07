@@ -117,6 +117,8 @@ struct StatusBar<Trailing: View, Leading: View>: View {
     let position: ReadingPosition?
     /// Editor work in progress (e.g. "Healing…").
     var activity: String?
+    /// Stops `activity`, when it can be stopped.
+    var cancelActivity: (() -> Void)?
     /// Mode-specific controls next to the page counter (zoom).
     @ViewBuilder var trailing: () -> Trailing
     /// Shown first (the problems count).
@@ -131,6 +133,7 @@ struct StatusBar<Trailing: View, Leading: View>: View {
             if let activity {
                 ProgressView().controlSize(.mini)
                 Text(activity).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                if let cancelActivity { StopButton(help: "Stop", action: cancelActivity) }
             }
             Spacer(minLength: 0)
             trailing()
@@ -149,10 +152,33 @@ struct StatusBar<Trailing: View, Leading: View>: View {
     }
 }
 
+/// A small ✕ next to work in progress in the status bar.
+struct StopButton: View {
+    let help: String
+    var shortcut = "⌘."
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(help)
+        .tip(help, shortcut: shortcut)
+    }
+}
+
 struct TranslationStatus: View {
     let project: ProjectSession
 
     var body: some View {
+        if project.progress == nil, project.isStopping {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("Stopping…").foregroundStyle(.secondary).lineLimit(1).fixedSize()
+            }
+            .tip("Finishing the current step; its result is discarded")
+        }
         if let p = project.progress {
             HStack(spacing: 6) {
                 ProgressView(value: Double(p.done), total: Double(max(1, p.total)))
@@ -164,6 +190,7 @@ struct TranslationStatus: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
+                StopButton(help: p.stage == "Exporting" ? "Stop exporting" : "Stop translating") { project.cancel() }
             }
         }
     }

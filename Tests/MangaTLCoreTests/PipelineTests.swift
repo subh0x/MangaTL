@@ -33,6 +33,19 @@ struct PipelineTests {
         return (result, peak.value)
     }
 
+    @Test func cancellingLeavesThePageUntouched() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("mangatl-cancel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: Self.pages.appendingPathComponent("ja_P01.jpg"), to: folder.appendingPathComponent("ja_P01.jpg"))
+        let source = try ProjectSource(folder: folder)
+        let store = source.store
+        let task = Task { try await PagePipeline.shared.process(source, index: 0, settings: ProjectSettings(language: .japanese), store: store) }
+        try await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(!store.hasPage(source.pageKey(at: 0)), "a cancelled page is not saved")
+    }
+
     @Test(arguments: [("ja_P01", SourceLanguage.japanese), ("fr_P01", .french), ("kr_P01", .korean), ("cn_P05", .chineseSimplified)])
     func translatesPage(name: String, language: SourceLanguage) async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("mangatl-pipe-\(UUID().uuidString)")

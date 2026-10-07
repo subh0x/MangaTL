@@ -259,6 +259,24 @@ enum SmokeRun {
         while project.isTranslating { try? await Task.sleep(for: .milliseconds(50)) }
         log("shortcuts: ⇧⌘T started translating all \(startedAll), queued \(queued) pages (untranslated: \(project.count - project.translatedCount))")
 
+        // Stop a translation, then start another straight away: the new one runs and finishes,
+        // and the stopped page is left untranslated.
+        let untranslated = project.pages.indices.filter { !project.isTranslated($0) }
+        if untranslated.count >= 2 {
+            project.translate(pages: Array(untranslated.prefix(2)))
+            try? await Task.sleep(for: .milliseconds(300))
+            project.cancel()
+            let stoppingShown = project.isStopping
+            project.translate(pages: [untranslated[0]])
+            var sawProgress = false
+            while project.isTranslating {
+                if project.progress != nil { sawProgress = true }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            for _ in 0..<200 where project.isStopping { try? await Task.sleep(for: .milliseconds(50)) }
+            log("cancel: stopping shown \(stoppingShown), new queue progress \(sawProgress), page \(untranslated[0] + 1) translated \(project.isTranslated(untranslated[0])), stopped page \(untranslated[1] + 1) translated \(project.isTranslated(untranslated[1])), still stopping \(project.isStopping)")
+        }
+
         // Auto names a language only for pages it has identified.
         project.settings.autoLanguage = true
         let languageBefore = project.detectedLanguage(ofPage: 1)
@@ -379,7 +397,16 @@ enum SmokeRun {
         for width in [1100.0, 1400] {
             NSApp.windows.first(where: { $0.isVisible })?.setContentSize(NSSize(width: width, height: 760))
             try? await Task.sleep(for: .milliseconds(500))
-            logToolbar("editor \(Int(width))")
+            if let block = editor.doc.blocks.first(where: { !$0.sourceText.isEmpty }) {
+            editor.selection = [block.id]
+            let before = block.translation
+            editor.retranslateSelected()
+            let busy = editor.busy != nil
+            editor.cancelWork()
+            try? await Task.sleep(for: .seconds(3))
+            log("cancel in editor: was busy \(busy), busy after \(editor.busy ?? "none"), text unchanged \(editor.doc.blocks.first { $0.id == block.id }?.translation == before)")
+        }
+        logToolbar("editor \(Int(width))")
         }
         await edit(editor, canvasSnapshot: copy.appendingPathComponent("../mangatl_editor_canvas.jpg").standardized)
         await lasso(editor)

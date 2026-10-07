@@ -34,6 +34,11 @@ final class ProjectSession {
     /// Views that re-render pages; held weakly (SwiftUI may create and discard several).
     @ObservationIgnored private var observers: [PageObserver] = []
     @ObservationIgnored private var worker: Task<Void, Never>?
+    /// Identifies the current queue, so a cancelled one finishing late can't clear its successor.
+    @ObservationIgnored private var workerID: UUID?
+    /// Cancelled queues still finishing their current stage (a model run can't stop part-way).
+    private(set) var stoppingCount = 0
+    var isStopping: Bool { stoppingCount > 0 }
     @ObservationIgnored private var stateWrite: Task<Void, Never>?
     /// Detected language per page id, read from the page docs on demand (nil = none detected).
     @ObservationIgnored private var detectedLanguages: [String: SourceLanguage?] = [:]
@@ -79,41 +84,64 @@ final class ProjectSession {
         guard !todo.isEmpty else { return }
         resolve(Self.translateStopped)
         let (source, store, settings) = (source, store, settings)
-        worker = Task {
+        startWork { id in
             for (n, key) in todo.enumerated() {
-                guard let index = pages.firstIndex(where: { $0.id == key }) else { continue }
-                progress = (n, todo.count, index, PagePipeline.Stage.detecting.rawValue)
+                guard let index = self.pages.firstIndex(where: { $0.id == key }) else { continue }
+                self.progress = (n, todo.count, index, PagePipeline.Stage.detecting.rawValue)
                 do {
                     let doc = try await PagePipeline.shared.process(source, index: index, settings: settings, store: store) { stage in
                         Task { @MainActor in
-                            if let p = self.progress, p.page == index { self.progress = (p.done, p.total, index, stage.rawValue) }
+                            if self.workerID == id, let p = self.progress, p.page == index { self.progress = (p.done, p.total, index, stage.rawValue) }
                         }
                     } detected: { language in
-                        Task { @MainActor in self.adoptDetectedLanguage(language) }
+                        Task { @MainActor in if self.workerID == id { self.adoptDetectedLanguage(language) } }
                     }
-                    lastTranslated = (key, (lastTranslated?.token ?? 0) + 1)
-                    pageChanged(index)
-                    resolve("Translate", page: key)
+                    // Cancelled while the last stage finished: the page wasn't saved; don't mark it.
+                    if Task.isCancelled { break }
+                    self.markTranslated(key)
+                    self.pageChanged(index)
+                    self.resolve("Translate", page: key)
                     if doc.blocks.isEmpty {
-                        report("Translate", page: key, "No text was found on this page. Use the Lasso tool in the editor to mark text the app missed.",
-                               severity: .warning) { [weak self] in self?.translate(keys: [key]) }
+                        self.report("Translate", page: key, "No text was found on this page. Use the Lasso tool in the editor to mark text the app missed.",
+                                    severity: .warning) { [weak self] in self?.translate(keys: [key]) }
                     }
                 } catch is CancellationError {
                     break
                 } catch let error as PipelineError {
+                    if Task.isCancelled { break }
                     // Missing models / language packs fail every page alike: stop instead of repeating it.
                     let remaining = Array(todo[n...])
-                    report(Self.translateStopped, "Translation stopped: \(error.localizedDescription)") { [weak self] in
+                    self.report(Self.translateStopped, "Translation stopped: \(error.localizedDescription)") { [weak self] in
                         self?.translate(keys: remaining)
                     }
                     break
                 } catch {
-                    report("Translate", page: key, error.localizedDescription) { [weak self] in self?.translate(keys: [key]) }
+                    if Task.isCancelled { break }
+                    self.report("Translate", page: key, error.localizedDescription) { [weak self] in self?.translate(keys: [key]) }
                 }
                 if Task.isCancelled { break }
             }
-            progress = nil
-            worker = nil
+        }
+    }
+
+    private func markTranslated(_ key: String) {
+        lastTranslated = (key, (lastTranslated?.token ?? 0) + 1)
+    }
+
+    /// Runs `body` as the current queue. When it ends, it clears the progress only if it is still
+    /// the current queue; a cancelled one just stops counting as "stopping".
+    private func startWork(_ body: @escaping @MainActor (UUID) async -> Void) {
+        let id = UUID()
+        workerID = id
+        worker = Task {
+            await body(id)
+            if workerID == id {
+                progress = nil
+                worker = nil
+                workerID = nil
+            } else {
+                stoppingCount -= 1
+            }
         }
     }
 
@@ -146,28 +174,33 @@ final class ProjectSession {
         resolve("Export")
         source.exportOptions = options
         let (source, store, settings, title) = (source, store, settings, title)
-        worker = Task {
+        startWork { id in
             do {
                 try await BookExporter.export(source, store: store, settings: settings, pages: pages, options: options, title: title,
                                               to: url) { done, total in
-                    Task { @MainActor in if self.worker != nil { self.progress = (done, total, min(done, total - 1), "Exporting") } }
+                    Task { @MainActor in if self.workerID == id { self.progress = (done, total, min(done, total - 1), "Exporting") } }
                 }
+                if Task.isCancelled { return }
                 if options.revealInFinder { NSWorkspace.shared.activateFileViewerSelecting([url]) }
             } catch is CancellationError {
             } catch {
-                report("Export", "Export to \(url.lastPathComponent) failed: \(error.localizedDescription)") { [weak self] in
+                if Task.isCancelled { return }
+                self.report("Export", "Export to \(url.lastPathComponent) failed: \(error.localizedDescription)") { [weak self] in
                     self?.export(pages: pages, options: options, to: url)
                 }
             }
-            progress = nil
-            worker = nil
         }
     }
 
+    /// Stops the running translation or export. The current stage finishes in the background
+    /// (shown as "Stopping…"); its result is discarded.
     func cancel() {
-        worker?.cancel()
-        worker = nil
+        guard let worker else { return }
+        worker.cancel()
+        self.worker = nil
+        workerID = nil
         progress = nil
+        stoppingCount += 1
     }
 
     func revert(page index: Int) {

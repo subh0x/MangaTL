@@ -153,6 +153,7 @@ final class EditorModel {
     /// Pending zoom request for the canvas (set by toolbar buttons).
     var zoomCommand: EditorCanvas.ZoomCommand?
     var busy: String?
+    @ObservationIgnored private var job: Task<Void, Never>?
     var error: String?
     private(set) var dirty = false
     /// Bumped when pixels change so the canvas redraws.
@@ -342,6 +343,7 @@ final class EditorModel {
         guard !blocks.isEmpty else { return }
         run("Translating…") { [project] in
             let texts = try await Translator.shared.translate(blocks.map(\.sourceText), from: self.language)
+            try Task.checkCancellation()   // stopped: leave the page as it is
             let byID = Dictionary(uniqueKeysWithValues: zip(blocks.map(\.id), texts))
             self.change("Translate") { doc in
                 for i in doc.blocks.indices { if let t = byID[doc.blocks[i].id] { doc.blocks[i].translation = t } }
@@ -354,9 +356,11 @@ final class EditorModel {
         let rect = block.textRect.denormalized(to: pageSize)
         run("Reading…") { [project, page] in
             let text = try await PagePipeline.shared.reread(page, rect: rect, language: self.language)
+            try Task.checkCancellation()   // stopped: leave the page as it is
             self.updateSelected("Read Text") { $0.sourceText = text }
             if !text.isEmpty {
                 let translated = try await Translator.shared.translate([text], from: self.language).first ?? ""
+                try Task.checkCancellation()   // stopped: leave the page as it is
                 self.updateSelected("Translate") { $0.translation = translated }
             }
         }
@@ -368,15 +372,31 @@ final class EditorModel {
         guard busy == nil else { return }
         busy = label
         let operation = label.replacingOccurrences(of: "…", with: "")
-        Task {
+        job = Task {
             do {
                 try await work()
-                project.resolve(operation, page: pageKey)
+                if !Task.isCancelled { project.resolve(operation, page: pageKey) }
+            } catch is CancellationError {
             } catch {
-                project.report(operation, page: pageKey, error.localizedDescription) { [weak self] in self?.run(label, work) }
+                if !Task.isCancelled {
+                    project.report(operation, page: pageKey, error.localizedDescription) { [weak self] in self?.run(label, work) }
+                }
             }
-            busy = nil
+            // A newer job may have started since this one was cancelled.
+            if !Task.isCancelled {
+                busy = nil
+                job = nil
+            }
         }
+    }
+
+    /// Stops the running job (translate, read, lasso, heal). The model may finish its current step
+    /// in the background, but the result is discarded and the page is left as it was.
+    func cancelWork() {
+        guard let job else { return }
+        job.cancel()
+        self.job = nil
+        busy = nil
     }
 
     // MARK: Lasso
@@ -398,6 +418,7 @@ final class EditorModel {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let translation = source.isEmpty ? "" : try await Translator.shared.translate([source], from: language).first ?? ""
             let erased = try await PagePipeline.shared.erase(composite, rect: local, area: area)
+            try Task.checkCancellation()   // stopped: leave the page as it is
             self.applyLasso(rect: rect, erased: erased, source: source, translation: translation)
             if source.isEmpty {
                 self.project.report("Lasso", page: self.pageKey, "No text was read inside the selection. Type the translation into the new box, or draw around the text more closely.",
@@ -712,6 +733,7 @@ final class EditorModel {
         let local = r.offsetBy(dx: -window.minX, dy: -window.minY)
         run("Healing…") {
             let healed = try await PagePipeline.shared.heal(composite, rect: local, mask: mask)
+            try Task.checkCancellation()   // stopped: leave the page as it is
             self.activate(layer)
             let canvas = self.activeCanvas()
             let before = PixelPatch(rect: r, bytes: canvas.bytes(in: r))

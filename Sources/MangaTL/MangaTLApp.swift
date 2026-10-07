@@ -89,7 +89,10 @@ struct ContentView: View {
                     export: { openExport() },
                     translatePage: { project?.translatePage(editor?.index ?? position.page, saving: editor) },
                     translateAll: { if let project { project.translate(pages: Array(0..<project.count)) } },
-                    stop: { project?.cancel() },
+                    stop: {
+                        project?.cancel()
+                        editor?.cancelWork()
+                    },
                     editPage: { if project != nil, editor == nil { edit(position.page) } },
                     // As the status-bar ⌘0: a whole page in the reader, default thumbnails in the grid.
                     zoomToFit: {
@@ -194,7 +197,8 @@ struct ContentView: View {
                         }, onClose: { problemsVisible = false })
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    StatusBar(project: project, position: project == nil ? nil : position, activity: editor?.busy ?? busy) {
+                    StatusBar(project: project, position: project == nil ? nil : position, activity: editor?.busy ?? busy,
+                              cancelActivity: editor?.busy == nil ? nil : { editor?.cancelWork() }) {
                         if project != nil, editor == nil {
                             ZoomControls(mode: mode, gridSize: Binding(get: { CGFloat(gridSize) }, set: { gridSize = Double($0) }),
                                          readerZoom: $readerZoom, readerColumn: ReaderLayout.defaultColumnWidth)

@@ -26,6 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - **Format:** JPEG, PNG or HEIC with a quality setting, at original, working or custom size.
   - **Package:** a folder with a name pattern, a CBZ or a PDF.
   - The last choices are remembered per project.
+- **Stop a translation from the status bar:** a ✕ next to the progress (also ⌘. and Translate › Stop Translating) stops page translation or export. The same ✕ stops editor work (translate, read again, lasso, heal). The status bar shows "Stopping…" while the current step finishes. Its result is discarded, so a stopped page is left as it was, and a new translation can start straight away.
 - **Thumbnails show your work:** in the page sidebar and the grid, translated or edited pages show their English lettering and visible retouch layers. Thumbnails update as soon as a page is saved, translated or restyled.
 - **Arrow keys move between pages:** in the editor, ← → (and ↑ ↓) go to the previous or next page and save as you go. In the reader, ← → jump a page while ↑ ↓ still scroll. Arrows stay in a text field while you type.
 - **Auto source language:** choose Auto in the language menu to identify each page's language from the script and words of most of its text when it is translated, then read and translate it in that language. The menu shows just "Auto" until the page you're on has been translated, then names the language found for that page (for example "Auto · Japanese"). The language is saved with the page, and the editor uses it.

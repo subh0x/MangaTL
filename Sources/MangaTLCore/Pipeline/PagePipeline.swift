@@ -55,6 +55,8 @@ public actor PagePipeline {
 
         progress(.erasing)
         let patch = try Inpainter.patch(for: page, regions: kept.map(\.0.text))
+        // Last chance to stop before anything is written: a cancelled page stays as it was.
+        try Task.checkCancellation()
 
         let blocks = zip(kept, translations).map { pair, translation in
             let (region, text) = pair
