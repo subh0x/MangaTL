@@ -63,7 +63,7 @@ final class ReaderLayout: NSCollectionViewLayout {
 
     func top(of index: Int) -> CGFloat { offsets.indices.contains(index) ? offsets[index] : 0 }
 
-    private func height(of index: Int) -> CGFloat { (columnWidth / aspects[index]).rounded() }
+    func height(of index: Int) -> CGFloat { aspects.indices.contains(index) ? (columnWidth / aspects[index]).rounded() : 0 }
 
     private func recomputeOffsets(from start: Int) {
         if offsets.count != aspects.count { offsets = Array(repeating: 0, count: aspects.count) }

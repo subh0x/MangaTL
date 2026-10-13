@@ -51,6 +51,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - ⇧⌘E (Export) and ⌘E (Edit Page) could trigger each other.
   - ⌘Z and ⇧⌘Z in the editor did nothing.
   - These shortcuts are now matched exactly by the app and listed in the menu bar (Translate menu, View › Zoom to Fit, Page › Edit Page). Undo and redo go to the editor, except while typing in a text field.
+- Zooming the reader moved back one page each time (page 3 → 2 → 1). Zoom now keeps the page, and the same spot within it.
 - Closing the editor showed page 1 although the page number said otherwise. The reader is now scrolled to the edited page once it has its size.
 
 ### Changed

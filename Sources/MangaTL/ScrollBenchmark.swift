@@ -297,6 +297,52 @@ enum SmokeRun {
         await pressSettled("down", [])
         try? await Task.sleep(for: .milliseconds(800))
         log("shortcuts: reader → from page 3 to \(afterRight + 1); ↓ scrolls (page \(view.currentPage + 1), not a jump)")
+        // Zooming must keep the current page.
+        view.jump(to: 2)
+        try? await Task.sleep(for: .milliseconds(600))
+        var zoomTrail = ["start p\(view.currentPage + 1) shows \(readerShownPage().map { "\($0 + 1)" } ?? "?")"]
+        for width in [1100.0, 800, 1300, 700] {
+            view.setReaderZoom(.column(width))
+            try? await Task.sleep(for: .milliseconds(600))
+            zoomTrail.append("\(Int(width))pt p\(view.currentPage + 1) shows \(readerShownPage().map { "\($0 + 1)" } ?? "?")")
+        }
+        // From halfway down page 3, zooming keeps that spot.
+        func spot() -> String {
+            guard let collection = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: NSCollectionView.self) }).first,
+                  let layout = collection.collectionViewLayout as? ReaderLayout,
+                  let y = collection.enclosingScrollView?.contentView.bounds.minY else { return "?" }
+            let page = layout.index(atY: y + ReaderLayout.spacing + 1)
+            return String(format: "p%d %.0f%%", page + 1, (y + ReaderLayout.spacing - layout.top(of: page)) / max(1, layout.height(of: page)) * 100)
+        }
+        if let collection = NSApp.windows.lazy.compactMap({ $0.contentView?.firstDescendant(of: NSCollectionView.self) }).first,
+           let layout = collection.collectionViewLayout as? ReaderLayout {
+            view.setReaderZoom(.column(900))
+            try? await Task.sleep(for: .milliseconds(600))
+            collection.scroll(NSPoint(x: 0, y: layout.top(of: 2) - ReaderLayout.spacing + layout.height(of: 2) / 2))
+            try? await Task.sleep(for: .milliseconds(400))
+            var midTrail = [spot()]
+            for width in [1200.0, 700, 1000] {
+                view.setReaderZoom(.column(width))
+                try? await Task.sleep(for: .milliseconds(600))
+                midTrail.append("\(Int(width))pt \(spot())")
+            }
+            log("zoom keeps the spot: \(midTrail.joined(separator: " → ")), current page \(view.currentPage + 1)")
+        }
+        view.setReaderZoom(.column(ReaderLayout.defaultColumnWidth))
+        log("zoom keeps page: \(zoomTrail.joined(separator: " → "))")
+        view.showGrid()
+        try? await Task.sleep(for: .milliseconds(500))
+        view.jump(to: 2)
+        try? await Task.sleep(for: .milliseconds(500))
+        var gridTrail = ["start p\(view.currentPage + 1)"]
+        for size in [200.0, 120, 300, 90, 150] {
+            view.setGridSize(size)
+            try? await Task.sleep(for: .milliseconds(500))
+            gridTrail.append("\(Int(size))pt p\(view.currentPage + 1)")
+        }
+        log("grid zoom keeps page: \(gridTrail.joined(separator: " → "))")
+        view.showReader()
+        try? await Task.sleep(for: .milliseconds(500))
         log("sidebar jumps to pages \(Array(0..<project.count)) → current \(landed)")
         log("translated marks: \(project.pages.prefix(2).map { project.translatedIDs.contains($0.id) })")
         await snapshot(width: 1000, name: "reader")

@@ -174,11 +174,22 @@ struct PageCollectionView: NSViewRepresentable {
             }
         }
 
-        /// Turns the reader zoom into a page width for the current window and keeps the top page in view.
+        /// The reader's page at the top of the view, and how far down it the view starts (0…1).
+        /// Showing a page leaves the gap above it in view (see `scroll(toPage:)`), so look past the
+        /// gap: otherwise the page before counts as the top one.
+        private func readerTop() -> (page: Int, fraction: CGFloat) {
+            let y = (collection?.enclosingScrollView?.contentView.bounds.minY ?? 0) + ReaderLayout.spacing
+            let page = readerLayout.index(atY: y + 1)
+            let height = max(1, readerLayout.height(of: page))
+            return (page, min(max((y - readerLayout.top(of: page)) / height, 0), 1))
+        }
+
+        /// Turns the reader zoom into a page width for the current window, keeping the same spot of
+        /// the top page in view.
         func applyReaderZoom() {
             guard let collection, let scroll = collection.enclosingScrollView else { return }
             let visible = scroll.contentSize
-            let top = readerLayout.index(atY: scroll.contentView.bounds.minY + 1)
+            let (top, fraction) = readerTop()
             let column: CGFloat = switch readerZoom {
             case .column(let width): width
             case .fitWidth: visible.width
@@ -191,7 +202,8 @@ struct PageCollectionView: NSViewRepresentable {
             guard mode == .reader else { return }
             collection.reloadData()   // decode size follows the width
             collection.layoutSubtreeIfNeeded()
-            collection.scroll(NSPoint(x: 0, y: readerLayout.top(of: top) - ReaderLayout.spacing))
+            let offset = (fraction * readerLayout.height(of: top)).rounded()
+            collection.scroll(NSPoint(x: 0, y: readerLayout.top(of: top) - ReaderLayout.spacing + offset))
         }
 
         func scroll(toPage page: Int) {
@@ -451,11 +463,8 @@ struct PageCollectionView: NSViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 guard let self, let collection = self.collection else { return }
                 self.focusUpdatePending = false
-                let top = collection.enclosingScrollView?.contentView.bounds.minY ?? 0
-                // Jumping to a page leaves the gap above it in view (see scroll(toPage:)); look
-                // past it, or the page before would count as current.
                 let page = self.mode == .reader
-                    ? self.readerLayout.index(atY: top + ReaderLayout.spacing + 1)
+                    ? self.readerTop().page
                     : collection.indexPathsForVisibleItems().map(\.item).min() ?? 0
                 if self.parent.position.page != page { self.parent.position.page = page }
             }
